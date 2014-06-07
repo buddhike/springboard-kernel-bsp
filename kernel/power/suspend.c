@@ -104,7 +104,7 @@ static int suspend_prepare(void)
 	if (!suspend_ops || !suspend_ops->enter)
 		return -EPERM;
 
-	pm_prepare_console();
+	//pm_prepare_console();
 
 	error = pm_notifier_call_chain(PM_SUSPEND_PREPARE);
 	if (error)
@@ -122,7 +122,7 @@ static int suspend_prepare(void)
 	usermodehelper_enable();
  Finish:
 	pm_notifier_call_chain(PM_POST_SUSPEND);
-	pm_restore_console();
+	//pm_restore_console();
 	return error;
 }
 
@@ -299,7 +299,7 @@ static void suspend_finish(void)
 	suspend_thaw_processes();
 	usermodehelper_enable();
 	pm_notifier_call_chain(PM_POST_SUSPEND);
-	pm_restore_console();
+	//pm_restore_console();
 }
 
 static int run_suspend(void)

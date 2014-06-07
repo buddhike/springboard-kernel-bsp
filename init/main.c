@@ -802,6 +802,11 @@ static int __init kernel_init(void * unused)
 	smp_init();
 	sched_init_smp();
 
+#ifdef VE_VER
+	if ( VE_VER > 0 )
+		printk("Via Embedded Kernel Revision: %d\n", VE_VER);
+#endif
+
 	do_basic_setup();
 
 	/* Open the /dev/console on the rootfs, this should never fail */

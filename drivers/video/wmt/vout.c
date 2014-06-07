@@ -461,14 +461,14 @@ find_video_mode:
 		vpixel = p_timing->vpixel + p_timing->vsync + p_timing->vfp + p_timing->vbp;
 		if( p_timing->option & VPP_OPT_INTERLACE ) {
 			info->resy *= 2;
-//			vpixel *= 2;
+			//vpixel *= 2;
 		}
 		info->pixclk = p_timing->pixel_clock;
 		info->fps = info->pixclk / (hpixel * vpixel);
 		info->resx_virtual = vpp_calc_fb_width(g_vpp.mb_colfmt,info->resx);
 		info->resy_virtual = info->resy;
 	}
-	DBG_MSG("Leave (%dx%d@%d,%d)\n",p_timing->hpixel,p_timing->vpixel,p_timing->pixel_clock,info->fps);
+		DBG_MSG("Leave (%dx%d@%d,%d)\n",p_timing->hpixel,p_timing->vpixel,p_timing->pixel_clock,info->fps);
 	return p_timing;
 }
 
@@ -678,6 +678,12 @@ int vout_config(unsigned int mask,vout_info_t *info)
 	int i;
 	unsigned int govr_mask = 0;
 
+#ifdef USING_XORG_TIMING
+	struct fb_var_screeninfo *xorg_var = info->var_xorg;
+	vpp_timing_t xorg_timing;
+	memset(&xorg_timing, 0, sizeof(vpp_timing_t));
+#endif
+
 	DBG_DETAIL("(0x%x)\n",mask);
 
 	if( mask == 0 )
@@ -702,6 +708,22 @@ int vout_config(unsigned int mask,vout_info_t *info)
 	}
 	
 	info->option = p_timing->option;
+#ifdef USING_XORG_TIMING  // Get timing from Xorg by var
+	if ( (0 == g_vpp.govrh_preinit) &&  (info->var_xorg->reserved[0])) {
+	/* If not in boot time and xorg has provided a timing, we will use xorg's timing */
+	xorg_timing.pixel_clock = xorg_var->pixclock * 1000;
+	xorg_timing.hsync       = xorg_var->hsync_len;
+	xorg_timing.hbp         = xorg_var->left_margin;
+	xorg_timing.hpixel      = xorg_var->xres;
+	xorg_timing.hfp		    = xorg_var->right_margin;
+	xorg_timing.vsync		= xorg_var->vsync_len;
+	xorg_timing.vbp			= xorg_var->upper_margin,
+	xorg_timing.vpixel		= xorg_var->yres;
+	xorg_timing.vfp			= xorg_var->lower_margin;
+	xorg_timing.option		= p_timing->option; 
+	}
+#endif
+
 	for(i=0;i<VPP_VOUT_NUM;i++){
 		if( (mask & (0x1 << i)) == 0 )
 			continue;
@@ -713,7 +735,24 @@ int vout_config(unsigned int mask,vout_info_t *info)
 			continue;
 
 		if( (govr_mask & (0x1 << vo->govr->mod)) == 0 ){
+#ifndef USING_XORG_TIMING
 			govrh_set_timing(vo->govr,p_timing);
+#else
+		if ( (0 == g_vpp.govrh_preinit) &&  (info->var_xorg->reserved[0])) {
+			/* If not in boot time and xorg has provied a timing, we will use xorg's timing to set HW */
+			printk("[%s] Set HW using Xorg's timing:\n", __FUNCTION__);
+			printk("%u\n", xorg_timing.pixel_clock);
+			printk("%d, %d, %d, %d\n", xorg_timing.hsync, xorg_timing.hbp, xorg_timing.hpixel, xorg_timing.hfp);
+			printk("%d, %d, %d, %d\n", xorg_timing.vsync, xorg_timing.vbp, xorg_timing.vpixel, xorg_timing.vfp);
+			govrh_set_timing(vo->govr,&xorg_timing);
+		} else {
+			printk("[%s] Set HW using 'vpp_video_mode_table''s timing:\n ", __FUNCTION__);
+			printk("%u\n", p_timing->pixel_clock);
+			printk("%d, %d, %d, %d\n", p_timing->hsync, p_timing->hbp, p_timing->hpixel, p_timing->hfp);
+			printk("%d, %d, %d, %d\n", p_timing->vsync, p_timing->vbp, p_timing->vpixel, p_timing->vfp);
+			govrh_set_timing(vo->govr,p_timing); 
+		}
+#endif
 			govr_mask |= (0x1 << vo->govr->mod);
 		}
 
@@ -861,7 +900,7 @@ int vout_get_edid_option(int no)
 	return vo->edid_info.option;
 }
 
-unsigned int vout_get_mask(vout_info_t *vo_info)
+unsigned int vout_get_mask(	vout_info_t *vo_info)
 {
 	if( g_vpp.dual_display == 0 )
 		return VPP_VOUT_ALL;

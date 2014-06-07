@@ -123,9 +123,14 @@
 
 // hw parameter
 #define VPP_FB_ADDR_ALIGN		64
-#define VPP_FB_WIDTH_ALIGN		64		// hw should 4 byte align,android framework 8 byte align
-                                        // modify by aksenxu VPU need 64bytes alignment
-                                        // you need modify FramebufferNativeWindow::FramebufferNativeWindow in android framework together
+/* The ex X driver need 64 byte alignment when using HW 2D EXA acceleration
+ * but for the new HW path, 8 bytes alignment is enough.
+ * If we do not modify it, there will be garbage on the screen with some modes, sucn as 1680x1050,etc.
+ * So we need to sync code with the new X(mali_r3p1) HW 2D EXA acceleration !!!
+ */
+// #define VPP_FB_WIDTH_ALIGN		64		// hw should 4 byte align,android framework 8 byte align
+#define VPP_FB_WIDTH_ALIGN		8		// hw should 4 byte align,android framework 8 byte align
+
 #define VPP_GOVR_DVO_DELAY_24	0x400F
 #define VPP_GOVR_DVO_DELAY_12	0x20
 

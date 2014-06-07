@@ -113,8 +113,8 @@ static int audio_dma_free(struct audio_stream_a *s);
 
 extern char wmt_dai_name[80];
 
-dmach_t pcm_out_dmach;
-struct dma_device_cfg_s *pcm_out_dma_cfg;
+dmach_t pcm_out_dmach = 0xFF;
+struct dma_device_cfg_s *pcm_out_dma_cfg = NULL;
 
 
 unsigned int wmt_pcm_wfd_get_buf(void)
@@ -401,6 +401,7 @@ static int audio_dma_free(struct audio_stream_a *s)
 	
 	wmt_free_dma(s->dmach);
 	s->dmach = NULL_DMA;
+	pcm_out_dma_cfg = NULL;
 	
 	return err;
 }
@@ -783,7 +784,9 @@ static int wmt_pcm_resume(struct snd_soc_dai *dai)
 	DBG_DETAIL();
 	
 	if (!runtime) {
-		wmt_setup_dma(pcm_out_dmach, *pcm_out_dma_cfg);
+		if ((pcm_out_dmach != 0xFF) && (pcm_out_dma_cfg != NULL)) {
+			wmt_setup_dma(pcm_out_dmach, *pcm_out_dma_cfg);
+		}
 		return 0;
 	}
 

@@ -29,6 +29,7 @@
 #ifdef __KERNEL__
 #include <asm/cacheflush.h>
 #include <linux/wmt-mb.h>
+//#include "../memblock.h"
 #define  THE_MB_USER "WMT-GMP"
 /* #include "gmp.h" */
 #elif defined(__POST__)
@@ -2939,9 +2940,7 @@ INLINE int ge_set_destination(ge_info_t *geinfo, const ge_surface_t *dst)
 	regs->des_height = dst->yres - 1;
 
 	ge_set_dst_pixelformat(geinfo, dst->pixelformat);
-
 	fix_dst_rmif(geinfo, dst);
-
 	return ge_set_direct_write(geinfo, dst);
 }
 
@@ -2962,9 +2961,7 @@ INLINE int ge_set_source(ge_info_t *geinfo, const ge_surface_t *src)
 	regs->src_height = src->yres - 1;
 
 	ge_set_src_pixelformat(geinfo, src->pixelformat);
-
 	fix_src_rmif(geinfo, src);
-
 	return 0;
 }
 
@@ -4921,6 +4918,8 @@ void fb_iounmap(ge_info_t *geinfo, void *va, size_t size)
 #endif
 }
 
+
+
 void ge_lock_surface(ge_info_t *geinfo, ge_surface_t *surface, void **vaddr)
 {
 	struct gmp *gmp;
@@ -5224,8 +5223,8 @@ static unsigned int rmif_baddr(const ge_surface_t *s, int type)
 	/* Note: formula was not optimized yet */
 
 	linesize = s->xres_virtual * GSPF_BYTES_PER_PIXEL(s->pixelformat);
-	a = linesize * (s->yres - 1);   /* offset to the last line */
-	b = ((linesize >> 6) - 1) << 6; /* offset to the last rmif burst (64 byte) */
+	a = linesize * (s->yres - 1);
+	b = ((linesize >> 6) - 1) << 6;
 
 	if (type == 1) b = 0;
 	if (type == 2) a = 0;

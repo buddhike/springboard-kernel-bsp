@@ -468,6 +468,7 @@ static int get_ge_param(struct ge_param_s *param)
 	return 0;
 }
 
+int is_boot_time = 1;
 static int __init gefb_probe(struct platform_device *dev)
 {
 	struct fb_info *info;
@@ -653,7 +654,7 @@ static int __init gefb_probe(struct platform_device *dev)
 	register_gmp_device(gmp_start, gmp_len);
 	gmp_set_log_level(GMP_LOG_ERR);
 #endif
-
+	is_boot_time = 0;
 	return 0;
 }
 

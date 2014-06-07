@@ -38,13 +38,9 @@ extern	"C" {
 /*-------------------- EXPORTED PRIVATE TYPES---------------------------------*/
 /* typedef  void  lcd_xxx_t;  *//*Example*/
 typedef enum {
-	LCD_WMT_OEM,
-	LCD_CHILIN_LW0700AT9003,
-	LCD_INNOLUX_AT070TN83,
-	LCD_AUO_A080SN01,
-	LCD_EKING_EK08009,
-	LCD_HANNSTAR_HSD101PFW2,
-	LCD_LVDS_1024x600,
+	LCD_LVDS,
+	LCD_TTL,
+	LCD_OEM, //There is no parameter table for OEM panel, it will give in wmt.display.param and wmt.display.tmr
 	LCD_PANEL_MAX
 } lcd_panel_t;
 
@@ -63,6 +59,41 @@ typedef struct {
 	void (*initial)(void);
 	void (*uninitial)(void);
 } lcd_parm_t;
+
+/*--------------------------------CH7305--------------------------------------*/
+/** *************************************************
+ * Add for CH7305
+ * JerryWang(VIA Embedded)
+ * 2013/03/20
+ *****************************************************
+ */
+#define EN_DITHERING	BIT(0)
+#define	DUAL_CHANNEL	BIT(1)
+#define	LDI		BIT(2)
+#define	OUTPUT_24	BIT(3)
+
+typedef struct{
+        unsigned char panel_mode; // single channel:0, dual channel:1
+	unsigned char deskew_xcmd;
+}lcd_setting_t;
+
+static lcd_setting_t lcd_setting;
+
+typedef struct lcd_transmitter_s{
+	struct lcd_transmitter_s *next;
+	char *name;
+	int (*init)(void);
+	void (*power_on)(void);
+	void (*power_off)(void);
+	void (*suspend)(void);
+	void (*resume)(void);
+	int (*set_mode)(lcd_setting_t mode);
+}lcd_transmitter_t;
+
+int lcd_transmitter_register(lcd_transmitter_t *ops);
+
+/*----------------------------------------------------------------------------*/
+
 
 /*-------------------- EXPORTED PRIVATE VARIABLES -----------------------------*/
 #ifdef LCD_C /* allocate memory for variables only in vout.c */
@@ -83,10 +114,15 @@ EXTERN lcd_parm_t *p_lcd;
 
 int lcd_panel_register(int no,void (*get_parm)(int mode));
 lcd_parm_t *lcd_get_parm(lcd_panel_t id,unsigned int arg);
-void lcd_set_parm(int id,int bpp);
 lcd_parm_t *lcd_get_oem_parm(int resx,int resy);
+lcd_parm_t *lcd_get_lvds_parm(int resx,int resy, int fps);
+lcd_parm_t *lcd_get_ttl_parm(int resx,int resy, int fps);
+//void lcd_set_parm(int id,int bpp);
+void lcd_set_parm(int ops, int bpp, int hpixel, int vpixel, int fps);
 void lcd_set_lvds_id(int id);
 int lcd_get_lvds_id(void);
+void lcd_suspend(void);
+void lcd_resume(void);
 
 /* LCD back light */
 #ifdef	__cplusplus

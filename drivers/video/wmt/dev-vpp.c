@@ -53,6 +53,7 @@
 
 #define VPP_PROC_NUM		10
 #define VPP_DISP_FB_MAX		10
+int pixclk_changed = 0;
 
 typedef struct {
 	int (*func)(void *arg);
@@ -68,6 +69,7 @@ typedef struct {
 	struct list_head list;
 } vpp_dispfb_parm_t;
 
+extern int is_boot_time;
 struct list_head vpp_disp_fb_list;
 struct list_head vpp_disp_free_list;
 struct list_head vpp_vpu_fb_list;
@@ -523,11 +525,12 @@ static int vpp_do_proc(ctl_table * ctl,int write,struct file *file,void *buffer,
 				DPRINT("-------------------------------------\n");
 				g_vpp.dbg_msg_level = vpp_proc_value;
 				break;
-
+		
 			case 2:
 				break;
 			case 3:
 				break;
+		
 #ifdef WMT_FTBLK_VPU
 			case 4:
 				p_vpu->dei_mode = vpp_proc_value;
@@ -1500,7 +1503,6 @@ void vpp_dei_mv_analysis(vdo_framebuf_t *s,vdo_framebuf_t *d)
 	}
 }
 #endif
-
 void vpp_set_NA12_hiprio(int type)
 {
 	static int reg1,reg2;
@@ -3688,6 +3690,7 @@ int vpp_exit(struct fb_info *info)
 unsigned int vpp_pmc_258_bk;
 unsigned int vpp_pmc_25c_bk;
 unsigned int vpp_vout_blank_mask;
+
 int vpp_check_vout_plugin(int clr_sts)
 {
 	vout_t *vo;
@@ -3728,7 +3731,7 @@ int vpp_check_vout_plugin(int clr_sts)
 int	vpp_suspend(int state)
 {
 	vpp_mod_base_t *mod_p;
-	vout_t *vo;
+	vout_t *vo;		
 	int i;
 
 	MSG("vpp_suspend\n");
@@ -3739,6 +3742,7 @@ int	vpp_suspend(int state)
 		}
 	}
 	vout_set_blank(VPP_VOUT_ALL,VOUT_BLANK_POWERDOWN);
+	
 	if( vpp_check_vout_plugin(1) ){
 		vpp_netlink_notify(USER_PID,DEVICE_PLUG_IN,0);
 		vpp_netlink_notify(WP_PID,DEVICE_PLUG_IN,0);
@@ -3784,10 +3788,15 @@ int	vpp_suspend(int state)
 #ifdef WMT_FTBLK_LVDS
 	lvds_suspend(2);
 #endif
+/*
 	if(lcd_get_lvds_id() == LCD_LVDS_1024x600){
 		mdelay(5);
 		REG32_VAL(GPIO_BASE_ADDR+0xC0) &= ~0x400; // GPIO10 off  8ms -> clock -> off 
 	}
+*/
+
+	lcd_suspend();
+	
 	return 0;
 } /* End of vpp_suspend */
 
@@ -3796,10 +3805,12 @@ int	vpp_resume(void)
 	vpp_mod_base_t *mod_p;
 	int i;
 
+/*
 	if(lcd_get_lvds_id() == LCD_LVDS_1024x600){
 		REG32_VAL(GPIO_BASE_ADDR+0x80) |= 0x400; // GPIO10 6ms -> clock r0.02.04 
 		REG32_VAL(GPIO_BASE_ADDR+0xC0) |= 0x400;
 	}
+*/
 
 	MSG("vpp_resume\n");
 
@@ -3810,7 +3821,6 @@ int	vpp_resume(void)
 			mod_p->resume(0);
 		}
 	}
-
 #ifdef WMT_FTBLK_LVDS
 	lvds_resume(0);
 #endif
@@ -3846,11 +3856,16 @@ int	vpp_resume(void)
 #ifdef WMT_FTBLK_HDMI
 	hdmi_resume(2);
 #endif
+
+	lcd_resume();
+
 	vout_set_blank(vpp_vout_blank_mask,VOUT_BLANK_UNBLANK);
+	
 	if( vpp_check_vout_plugin(0) ){
 		vpp_netlink_notify(USER_PID,DEVICE_PLUG_IN,1);
 		vpp_netlink_notify(WP_PID,DEVICE_PLUG_IN,1);
 	}
+	
 	return 0;
 } /* End of vpp_resume */
 #endif
@@ -4312,6 +4327,7 @@ int vout_ioctl(unsigned int cmd,unsigned long arg)
 					break;
 				}
 				memset(&parm,0,sizeof(vpp_vout_info_t));
+				
 				if( (vo = vout_get_entry_adapter(num)) == 0 ){
 					retval = -ENOTTY;
 					break;
@@ -4954,6 +4970,7 @@ int scl_ioctl(unsigned int cmd,unsigned long arg)
 				vpu_r_set_mif_enable(1);
 				vpu_r_set_mif2_enable(1);
 
+
 				vpp_set_NA12_hiprio(2);
 				p_vpu->scl_fb = parm.dst_fb;
 				ge_do_alpha_bitblt(&parm.src_fb,&parm.src2_fb,&parm.dst_fb);
@@ -5298,7 +5315,8 @@ void vpp_var_to_fb(struct fb_var_screeninfo *var, struct fb_info *info,vdo_frame
             var->xres_virtual = vpp_calc_align(var->xres_virtual, 64);
         else
 #endif
-            var->xres_virtual = vpp_calc_fb_width(fb->col_fmt,var->xres);
+
+		var->xres_virtual = vpp_calc_fb_width(fb->col_fmt,var->xres);
 		fb->img_w = var->xres;
 		fb->img_h = var->yres;
 		fb->fb_w = var->xres_virtual;
@@ -5431,6 +5449,10 @@ pan_disp_govr2:
 #endif
 			
 //			if( var && (var->xres == fb_p->fb.img_w) && (var->yres == fb_p->fb.img_h) ){
+// 			In boot time, if we still set the HW to 64 bytes align, the boot logo will crash,
+// 			because the boot logo data has been written without 64 bytes align in Uboot.
+				if (is_boot_time)
+					vo_info->fb.fb_w = vo_info->fb.img_w;
 				vout_set_framebuffer(vout_get_mask(vo_info),&vo_info->fb);
 //			}
 #ifdef CONFIG_VPP_STREAM_CAPTURE
@@ -5473,6 +5495,36 @@ pan_disp_govr2:
 	return 0;
 }
 
+/* The MAX_DIFFER is a empirical value. It means the minimum pixel clock difference between two modes with the 
+ * same resolution in mode table vpp_video_mode_table[]. Actually the value is 46, but we need to 
+ * keep a small space to avoid the convertion error between pixel clock in HZ and in ps (pico seconds)  
+ */
+#define MAX_DIFER 40
+
+/*  As the var_pixclk is passed from Xorg, and vo_pixclk is from the fb driver. The values sometimes are 
+ *  not totaly the same to a same mode. Such as for mode 1024x768@60, the var_pixclk may be 15384, 
+ *  while vo_pixclk may be 15381. So we can not just use if (vo_pixclk == var_pixclk) 
+ *  to judge if the pixel clocks are equal, or the re-init of hardware may cause screen crash.
+ */
+static int is_equal(unsigned int vo_pixclk, unsigned int var_pixclk)
+{
+        int ret = 0;
+
+        if ((ret = (vo_pixclk - var_pixclk)) >= 0)
+        {
+                if (ret < MAX_DIFER)
+                        return 1;
+        }
+        else
+        {
+                ret = var_pixclk - vo_pixclk;
+                if (ret < MAX_DIFER)
+                        return 1;
+        }
+
+        return 0;
+}
+static int using_fixed_timing = 1;
 int vpp_set_par(struct fb_info *info)
 {
 	vout_info_t *vo_info;
@@ -5492,15 +5544,29 @@ int vpp_set_par(struct fb_info *info)
 		return 0;
 	}
 #endif
-
+	
+#ifdef USING_XORG_TIMING
+	if (g_vpp.govrh_preinit)
+		info->var.reserved[0] = 0; 
+		/* Init it in boot time (first time) 
+		* The corresponding  XORG driver will set this field to "1" to 
+		* tell the kernel that X will provide the timing 
+		*/
+	vo_info->var_xorg = &(info->var); /* var_xorg holds the timing from XORG */
+#endif
+	
 	info->var.xres_virtual = vpp_calc_fb_width(g_vpp.mb_colfmt,info->var.xres);
 	if( (vo_info->force_config) || (g_vpp.govrh_preinit) ){
 		vo_info->force_config = 0;
 	}
-	else if( (vo_info->resx == info->var.xres) && (vo_info->resy == info->var.yres) && 
-		(vo_info->pico == info->var.pixclock) ){
-		return 0;
-	}
+	else if( (vo_info->resx == info->var.xres) && (vo_info->resy == info->var.yres)  &&
+                ( is_equal(vo_info->pixclk, info->var.pixclock) )){
+                pixclk_changed = 0;
+                return 0;
+    }
+
+    pixclk_changed = 1;
+
 	DBG_MSG("fb%d,%dx%d,%d\n",info->node,info->var.xres,info->var.yres,info->var.pixclock);
 	DBG_MSG("vir %dx%d\n",info->var.xres_virtual,info->var.yres_virtual);
 //	DBG_MSG("%dx%d,%d\n",vo_info->resx,vo_info->resy,vo_info->pixclk);
@@ -5510,8 +5576,21 @@ int vpp_set_par(struct fb_info *info)
 	vo_info->resy = info->var.yres;
 	vo_info->resx_virtual = info->var.xres_virtual;
 	vo_info->resy_virtual = info->var.yres_virtual;
-	vo_info->pico = info->var.pixclock;
-	vo_info->pixclk = vpp_check_pixclock(info->var.pixclock,1);
+#ifdef USING_XORG_TIMING
+	if ((0 == g_vpp.govrh_preinit) &&  (info->var.reserved[0] == 1) ) {
+		/* If not in boot time and xorg has provided the timing
+		 * The pixclk from xorg is KHZ, and no need to transform
+		 */
+		vo_info->pixclk = info->var.pixclock *1000;		 
+	}
+	else {
+		vo_info->pixclk = KHZ2PICOS(info->var.pixclock) * 1000;
+	}
+#else
+	vo_info->pixclk = KHZ2PICOS(info->var.pixclock) * 1000;
+#endif
+	
+	
 	vo_info->bpp = info->var.bits_per_pixel;
 	vo_info->fps = info->var.pixclock / (info->var.xres * info->var.yres);
 	if( vo_info->fps == 0 ) vo_info->fps = 60;
@@ -5535,13 +5614,18 @@ int vpp_set_par(struct fb_info *info)
 #endif
 
 	vpp_config(vo_info);
-	if( vo_info->govr ){
-		vo_info->pixclk = vpp_get_base_clock(vo_info->govr->mod);
-		info->var.pixclock = KHZ2PICOS(vo_info->pixclk/1000);
+// The following codes will make the screen crash on VT6076
+//	if( vo_info->govr ){
+//		vo_info->pixclk = vpp_get_base_clock(vo_info->govr->mod);
+//		info->var.pixclock = KHZ2PICOS(vo_info->pixclk/1000);
+//	}
+
+if( (vo_info->resx != info->var.xres) || (vo_info->resy != info->var.yres) ){
+		DBG_MSG("vout mode update (%dx%d)\n",vo_info->resx,vo_info->resy);
+		vo_info->resx = info->var.xres;
+		vo_info->resy = info->var.yres;
 	}
-	info->var.xres = vo_info->resx;
-	info->var.yres = vo_info->resy;
-	info->var.xres_virtual = vpp_calc_fb_width(g_vpp.mb_colfmt,info->var.xres);
+	info->var.xres_virtual = vpp_calc_fb_width(VPP_UBOOT_COLFMT,info->var.xres);
 	info->var.yres_virtual = info->var.yres * VPP_MB_ALLOC_NUM;
 	
 	if( info->node == 1 ){
@@ -5551,6 +5635,27 @@ int vpp_set_par(struct fb_info *info)
 		info->var.yres_virtual = info->var.yres * VPP_MB_ALLOC_NUM;
 //		DPRINT("[VPP] fb1 smem 0x%x,len %d,base 0x%x\n",info->fix.smem_start,info->fix.smem_len,info->screen_base);
 	}
+#ifndef USING_XORG_TIMING
+	info->var.pixclock = vpp_get_base_clock(vo_info->govr->mod) / 1000;
+	info->var.pixclock = KHZ2PICOS(info->var.pixclock);
+	vo_info->pixclk = info->var.pixclock;
+#else
+	if ((0 == g_vpp.govrh_preinit) &&  (info->var.reserved[0] == 1) ) {
+		/* if not in boot time and xorg driver has passed the timing */
+		vo_info->pixclk = vo_info->var_xorg->pixclock;
+	}
+   	else if (vo_info->fixed_timing && using_fixed_timing){
+                vo_info->pixclk = vo_info->var_xorg->pixclock;
+                using_fixed_timing = 0;
+        }
+
+	else {
+		/* Use the same way as USING_XORG_TIMING not defined. */
+		info->var.pixclock = vpp_get_base_clock(vo_info->govr->mod) / 1000;
+		info->var.pixclock = KHZ2PICOS(info->var.pixclock);
+		vo_info->pixclk = info->var.pixclock;
+	}		
+#endif
 	g_vpp.ge_direct_init = 1;
 	vpp_set_mutex(info->node,0);
 	
@@ -5578,17 +5683,7 @@ int vpp_set_blank(struct fb_info *info,int blank)
 		vout_unblank_mask = vout_get_mask(vo_info);
 	}
 
-	if( g_vpp.virtual_display || (g_vpp.dual_display == 0) ){
-		int plugin;
-		
-		plugin = vout_chkplug(VPP_VOUT_NUM_HDMI);
-		vout_blank_mask &= ~((0x1 << VPP_VOUT_NUM_DVI)+(0x1 << VPP_VOUT_NUM_HDMI));
-		vout_unblank_mask &= ~((0x1 << VPP_VOUT_NUM_DVI)+(0x1 << VPP_VOUT_NUM_HDMI));
-		vout_blank_mask |= (plugin)? (0x1 << VPP_VOUT_NUM_DVI):(0x1 << VPP_VOUT_NUM_HDMI);
-		vout_unblank_mask |= (plugin)? (0x1 << VPP_VOUT_NUM_HDMI):(0x1 << VPP_VOUT_NUM_DVI);
-	}
-	vout_set_blank(vout_blank_mask,1);
-	vout_set_blank(vout_unblank_mask,0);
+	vout_set_blank((g_vpp.dual_display)? vo_info->vo_mask:VPP_VOUT_ALL,blank);
 	return 0;
 }
 

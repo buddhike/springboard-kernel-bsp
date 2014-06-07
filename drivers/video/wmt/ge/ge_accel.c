@@ -48,6 +48,8 @@ extern int vpp_pan_display(struct fb_var_screeninfo *var,
 		struct fb_info *info, int enable);
 #endif /* VPU */
 
+extern int is_boot_time;
+extern  int pixclk_changed;
 extern unsigned long msleep_interruptible(unsigned int msecs);
 extern int auto_pll_divisor(enum dev_id dev, enum clk_cmd cmd,
 		int unit, int freq);
@@ -915,11 +917,11 @@ int ge_ioctl(struct fb_info *info, unsigned int cmd, unsigned long arg)
 		break;
 	case GEIOGET_CHIP_ID:
 		ge_get_chip_id(geinfo, &chip_id);
-		copy_to_user((void *)arg, (void *)&chip_id,
+		copy_to_user((void *)arg, (void *) &chip_id,
 			sizeof(unsigned int));
 		break;
 	case GEIO_ROTATE:
-		ret = get_args(args, (void *)arg, 6);
+		ret = get_args(args, (void *) arg, 6);
 		if (ret == 0) {
 			ge_simple_rotate(args[0], args[1], args[2], args[3],
 					 args[4], args[5]);
@@ -1055,14 +1057,24 @@ int ge_pan_display(struct fb_var_screeninfo *var, struct fb_info *info)
 
 	get_surface(info, var, &s);
 
+	if(is_boot_time){
+	// Durning the boot time, if we did the pan, the boot logo will crash
+	// Because in vpp_set_par, we didn't save the current mode 
+	// to fb_var_screeninfo, if we did the pan with a strange fb_var_screeninfo value,
+	// the screen will crash.
+	// So we have two choice, save its value in vpp_set_par, or skip pan action
+	// We choose the second one in this 0.9 kernel while the first one in 0.7 kernel.
+	// Both can work well.
+		goto end;
+	}
+
 	if (num_skip_frames) {
-		/* Annotate this line to solve the Suspend-Resume error of no frame buffer console, Max CA. Chen, VIA Embedded, 2013.4.16 */		
 		//lock_screen(info);
 		num_skip_frames--;
 	} else {
 		unlock_screen(info);
-		if ((var->activate & FB_ACTIVATE_MASK) == FB_ACTIVATE_NOW &&
-		    surface_changed(primary_surface, &s)) {
+		if (((var->activate & FB_ACTIVATE_MASK) == FB_ACTIVATE_NOW &&
+                    surface_changed(primary_surface, &s)) || pixclk_changed){
 			if (needs_ge_amx()) {
 				amx_show_surface(geinfo, 0, &s, 0, 0);
 				amx_sync(geinfo);
@@ -1074,7 +1086,8 @@ int ge_pan_display(struct fb_var_screeninfo *var, struct fb_info *info)
 			memcpy(primary_surface, &s, sizeof(ge_surface_t));
 		}
 	}
-
+end:
+	pixclk_changed = 0;
 	return 0;
 }
 

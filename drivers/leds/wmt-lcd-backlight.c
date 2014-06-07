@@ -255,7 +255,9 @@ static int lcd_backlight_suspend
 
 	addr = PWM_SCALAR_REG_ADDR + (0x10 * g_pwm_setting.id);
 	g_pwm_setting.scalar = (REG32_VAL(addr) & 0xFFF);
-	//g_pwm_setting.duty = 0; // for android , AP will set duty to 0
+	
+	addr = PWM_DUTY_REG_ADDR + (0x10 * g_pwm_setting.id);
+	g_pwm_setting.duty = (REG32_VAL(addr) & 0xFFF); // for android , AP will set duty to 0
 
 	return 0;
 }
@@ -268,7 +270,8 @@ static int lcd_backlight_resume
 	pwm_set_scalar(g_pwm_setting.id, g_pwm_setting.scalar);
 	pwm_set_period(g_pwm_setting.id, g_pwm_setting.period);
 
-	pwm_set_duty(g_pwm_setting.id, 5);
+	//pwm_set_duty(g_pwm_setting.id, 5);
+	pwm_set_duty(g_pwm_setting.id, g_pwm_setting.duty);
 	pwm_set_control(g_pwm_setting.id, g_pwm_setting.config);
 
 	g_isresume = 1;

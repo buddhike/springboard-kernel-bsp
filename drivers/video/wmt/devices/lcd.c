@@ -39,14 +39,24 @@ typedef struct {
 	lcd_parm_t* (*get_parm)(int arg);
 } lcd_device_t;
 
+// Currrent Available transmitter
+lcd_transmitter_t *p_lcd_transmitter = 0;		
+
 /*----------EXPORTED PRIVATE VARIABLES are defined in lcd.h  -------------*/
 /*----------------------- INTERNAL PRIVATE VARIABLES - -----------------------*/
 /* int  lcd_xxx;        *//*Example*/
 lcd_device_t lcd_device_array[LCD_PANEL_MAX];
-int lcd_panel_on = 1;
+int lcd_panel_on = 0;
 int lcd_pwm_enable;
 lcd_panel_t lcd_panel_id = LCD_PANEL_MAX;
-int lcd_panel_bpp = 24;
+
+unsigned int lcd_panel_cap;
+int lcd_panel_bpp;
+int lcd_panel_msb;
+int lcd_panel_dual;
+int lcd_panel_hpixel;
+int lcd_panel_vpixel;
+int lcd_panel_fps;
 
 extern vout_dev_t lcd_vout_dev_ops;
 
@@ -75,19 +85,38 @@ int lcd_get_lvds_id(void)
 {
 	return lcd_lvds_id;
 }
-
-void lcd_set_parm(int id,int bpp)
+void lcd_set_parm(int ops, int bpp, int hpixel, int vpixel, int fps)
 {
-	lcd_panel_id = id;
-	lcd_panel_bpp = bpp;
-}
 
+	if(ops&0x4)
+		lcd_panel_id = LCD_OEM;
+	else
+		lcd_panel_id = (ops&0x1)?1:0;
+
+	lcd_panel_msb = (ops & 0x8)?1:0;
+	lcd_panel_dual = (ops & 0x2)?1:0;
+	lcd_panel_cap = (ops & 0xF0) >> 4;	
+	
+	lcd_panel_bpp = bpp;
+	lcd_panel_hpixel = hpixel;
+	lcd_panel_vpixel = vpixel;
+	lcd_panel_fps = fps;
+}
 vout_dev_t *lcd_get_dev(void)
 {
 	if( lcd_panel_id >= LCD_PANEL_MAX )
 		return 0;
 
 	return &lcd_vout_dev_ops;
+}
+
+void lcd_suspend(void){
+	if (lcd_panel_on && p_lcd_transmitter && p_lcd_transmitter->suspend)
+		p_lcd_transmitter->suspend();
+}
+void lcd_resume(void){
+	if (lcd_panel_on && p_lcd_transmitter && p_lcd_transmitter->resume)
+		p_lcd_transmitter->resume();
 }
 
 #ifdef __KERNEL__
@@ -141,9 +170,116 @@ lcd_parm_t *lcd_get_parm(lcd_panel_t id,unsigned int arg)
 	return 0;
 }
 
+/*----------------------- CH7305 --------------------------------------------------*/
+/**************************************************
+ * Add for CH7305
+ * JerryWang(VIA Embedded)
+ * 2013/03/20
+ *****************************************************
+ */
+int lcd_transmitter_register(lcd_transmitter_t *ops)
+{
+	lcd_transmitter_t *list;
+	
+	if(ops && ops->init && ops->init())
+		return -1;
+
+	ops->next = 0;
+	
+	if(  p_lcd_transmitter == 0 )
+		p_lcd_transmitter = ops;		
+	else {
+		list =  p_lcd_transmitter;
+		while( list->next != 0 ){
+			list = list->next;
+		}
+		list->next = ops;		
+	}
+//	MSG("[LCD] LCD Transmitter: %s\n", ops->name);
+
+		return 0;
+}
+
+int get_lcd_setting(void)
+{
+        if ( !(p_lcd ||lcd_panel_id == LCD_OEM ))
+                return -1;
+
+        int x,y;
+        x = lcd_panel_hpixel;//p_lcd->timing.hpixel;
+        y = lcd_panel_vpixel;//p_lcd->timing.vpixel;
+
+        if ((x == 800 && y == 480) ||
+                (x == 800 && y == 600) ||
+                (x == 1024 && y == 600) ||
+                (x == 1024 && y == 768) ||
+                (x == 1366 && y == 768)) {
+                lcd_setting.panel_mode &= ~DUAL_CHANNEL;
+        }
+        else if((x == 1280 && y == 1024) ||
+                (x == 1440 && y == 1050) ||
+                (x == 1680 && y == 1050) ||
+                (x == 1600 && y == 1200)) {
+                lcd_setting.panel_mode |= DUAL_CHANNEL;
+        }else if(lcd_panel_dual)  {
+        	   lcd_setting.panel_mode |= DUAL_CHANNEL;
+        }else
+        	   lcd_setting.panel_mode &= ~DUAL_CHANNEL;
+			
+        	
+
+        if ( lcd_panel_msb == 1 )
+                lcd_setting.panel_mode |= LDI;
+        else
+                lcd_setting.panel_mode &= ~LDI;
+
+	 if(lcd_panel_bpp == 24)
+	 	lcd_setting.panel_mode |= OUTPUT_24;
+	 else
+	 	lcd_setting.panel_mode &= ~OUTPUT_24;
+
+        lcd_setting.panel_mode &= ~EN_DITHERING;
+        lcd_setting.deskew_xcmd = 2;
+
+        return 0;
+}
+
+int transmitter_enable(void)
+{
+	lcd_transmitter_t *list;	
+	if(  p_lcd_transmitter == 0 )
+		return -1;
+	else{
+		list =  p_lcd_transmitter;
+		do{
+			if ( list->init() != 0 )
+				//MSG("[LCD] Err: Transmitter %s registerred but failed to detect\n", list->name);
+				list = list->next;				
+			else{
+				list->next = 0;
+				p_lcd_transmitter = list;
+				MSG("[LCD] LCD transmitter %s detected\n", list->name);
+				//p_lcd_transmitter->power_off();
+				return 0;
+			}
+		}while(list != 0);
+	}
+	
+	p_lcd_transmitter = 0;
+
+	return -1;
+}
+
+
 /*----------------------- vout device plugin --------------------------------------*/
 void lcd_set_power_down(int enable)
 {
+	if (p_lcd_transmitter){
+		if ( enable )
+			p_lcd_transmitter->power_off();
+		else
+			p_lcd_transmitter->power_on();
+	}
 
 }
 
@@ -155,26 +291,10 @@ int lcd_set_mode(unsigned int *option)
 
 	vo = lcd_vout_dev_ops.vout;
 	if( option ){
-		unsigned int capability;
-
-		if( lcd_panel_id == 0 ){
-			p_lcd = lcd_get_oem_parm(vo->resx,vo->resy);
-		}
-		else if( (p_lcd = lcd_get_parm(lcd_panel_id,lcd_panel_bpp)) ){
-			MSG("[LCD] %s (id %d,bpp %d)\n",p_lcd->name,lcd_panel_id,lcd_panel_bpp);
-		}
-		else {
-			DBG_ERR("lcd %d not support\n",lcd_panel_id);
-			return -1;
-		}
 		
-		if( p_lcd->initial ){
-			p_lcd->initial();
-		}
-		
-		capability = p_lcd->capability;
-		govrh_set_dvo_clock_delay(vo->govr,(capability & LCD_CAP_CLK_HI)? 0:1, 0);
-		govrh_set_dvo_sync_polar(vo->govr,(capability & LCD_CAP_HSYNC_HI)? 0:1,(capability & LCD_CAP_VSYNC_HI)? 0:1);
+		// Set DVO
+		govrh_set_dvo_clock_delay(vo->govr,(lcd_panel_cap & LCD_CAP_CLK_HI)? 0:1, 0);
+		govrh_set_dvo_sync_polar(vo->govr,(lcd_panel_cap & LCD_CAP_HSYNC_HI)? 0:1,(lcd_panel_cap & LCD_CAP_VSYNC_HI)? 0:1);
 		switch( lcd_panel_bpp ){
 			case 15:
 				govrh_IGS_set_mode(vo->govr,0,1,1);
@@ -186,25 +306,33 @@ int lcd_set_mode(unsigned int *option)
 				govrh_IGS_set_mode(vo->govr,0,2,1);
 				break;
 			case 24:
-				govrh_IGS_set_mode(vo->govr,0,0,0);
+				govrh_IGS_set_mode(vo->govr,0,0,(lcd_setting.panel_mode & LDI)? 1:0);
 				break;
 			default:
 				break;
 		}
-//		g_vpp.vo_enable = 1;
+
+		// Set LCD transmitter
+		if( p_lcd_transmitter ){
+			p_lcd_transmitter->power_off();
+			p_lcd_transmitter->set_mode(lcd_setting);
+			p_lcd_transmitter->power_on();
+		}
+
 	}
 	else {
-		if( p_lcd && p_lcd->uninitial ){
-			p_lcd->uninitial();
-		}
-		p_lcd = 0;
+
+		if (p_lcd_transmitter && p_lcd_transmitter->power_off)
+			p_lcd_transmitter->power_off(); 
+
+		p_lcd_transmitter = 0;
 	}
 	return 0;
 }
 
 int lcd_check_plugin(int hotplug)
 {
-	return (p_lcd)? 1:0;
+	return (p_lcd ||lcd_panel_id == LCD_OEM )? 1:0;
 }
 
 int lcd_get_edid(char *buf)
@@ -214,34 +342,53 @@ int lcd_get_edid(char *buf)
 	
 int lcd_config(vout_info_t *info)
 {
-	info->resx = p_lcd->timing.hpixel;
-	info->resy = p_lcd->timing.vpixel;
+	info->resx = lcd_panel_hpixel;//p_lcd->timing.hpixel;
+	info->resy = lcd_panel_vpixel;//p_lcd->timing.vpixel;
 //	info->p_timing = &(p_lcd->timing);
-	info->fps = p_lcd->fps;
+	info->fps = lcd_panel_fps;//p_lcd->fps;
 	return 0;
 }
 
 int lcd_init(vout_t *vo)
 {
-	// vo_set_lcd_id(LCD_CHILIN_LW0700AT9003);
 	if( lcd_panel_id >= LCD_PANEL_MAX ){
 		return -1;
 	}
-	
-	if( lcd_panel_id == 0 ){
-		p_lcd = lcd_get_oem_parm(vo->resx,vo->resy);
-	}
-	else {
-		p_lcd = lcd_get_parm(lcd_panel_id,24);
-	}
 
-	if( p_lcd == 0 ) 
+	switch(lcd_panel_id){
+		case 0:
+			p_lcd = lcd_get_lvds_parm(lcd_panel_hpixel,lcd_panel_vpixel,lcd_panel_fps);
+			break;
+		case 1:
+			p_lcd = lcd_get_ttl_parm(lcd_panel_hpixel,lcd_panel_vpixel,lcd_panel_fps);
+			break;
+		default:
+			;
+	}		
+
+	if( p_lcd == 0 && lcd_panel_id != LCD_OEM) {
+		printk("[Err]Fail to get panel timing. Please give timing by [wmt.display.tmr] in uboot.\n");
 		return -1;
+	}
 
-	// set default parameters
-	vo->resx = p_lcd->timing.hpixel;
-	vo->resy = p_lcd->timing.vpixel;
-	vo->pixclk = p_lcd->timing.pixel_clock;
+	if (p_lcd){
+		printk("Timing:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d\n",p_lcd->timing.pixel_clock,
+			p_lcd->timing.option,p_lcd->timing.hsync,p_lcd->timing.hbp,
+			p_lcd->timing.hpixel, p_lcd->timing.hfp,p_lcd->timing.vsync,
+			p_lcd->timing.vbp,p_lcd->timing.vpixel,p_lcd->timing.vfp);
+
+		// set default parameters
+		vo->resx = p_lcd->timing.hpixel;
+		vo->resy = p_lcd->timing.vpixel;
+		vo->pixclk = p_lcd->timing.pixel_clock;
+		lcd_panel_cap = p_lcd->capability;
+	}
+	lcd_panel_on = 1;
+	
+	// set lcd transmitter
+	get_lcd_setting();
+	transmitter_enable();
+
 	return 0;
 }
 

@@ -1,6 +1,7 @@
 VERSION = 3
 PATCHLEVEL = 0
 SUBLEVEL = 8
+#EXTRAVERSION = _$(shell date +%y%m%d.%H%M)
 EXTRAVERSION =
 NAME = Sneaky Weasel
 
@@ -656,6 +657,12 @@ endif
 ifneq ($(KCFLAGS),)
         $(call warn-assign,CFLAGS)
         KBUILD_CFLAGS += $(KCFLAGS)
+endif
+
+# Add SVN version information
+SVNVER = 0
+ifneq ($SVNVER),)
+        KBUILD_CFLAGS +=-DVE_VER=$(SVNVER)
 endif
 
 # Use --build-id when available.

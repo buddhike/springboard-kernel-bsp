@@ -88,6 +88,9 @@ unsigned int pwm_level[2] = { 0, 0 };
 unsigned int pwm_freq[2] = {16000, 16000 }; //modified by howayhuo. org: {1000, 1000 }
 unsigned int pwm_enable[2] = {0,0};
 
+unsigned int suspd_lcd_pw[3] = {0,0,0};
+unsigned int suspd_gpio_gp31[3] = {0,0,0};
+
 DEFINE_SEMAPHORE(pwm_lock);
 
 #define ENV_DISPLAY_PWM "wmt.display.pwm"
@@ -108,6 +111,21 @@ static int g_pwm_param;
 
 extern int wmt_getsyspara(char *varname, unsigned char *varval, int *varlen);
 
+
+#ifdef CONFIG_PWM0_GPIO_Output_Without_Frequency_Control
+/* Disable PWM0 frequency output to avoid I20 hang situation */
+void PWM0_GPIO_Output_Without_Frequecny_Control(int enable)
+{
+	printk("Disable PWM0 frequency function, use GPIO31 to %s PWM output\n",(enable==1)?"enable":"disable");
+	REG8_VAL(PWM0_BASE_ADDR)=0x0;
+	REG8_VAL(GPIO_OC_GP31_BYTE_ADDR) |= 0x08;
+	REG8_VAL(GPIO_CTRL_GP31_BYTE_ADDR) |= 0x08;
+	if ( enable )
+		REG8_VAL(GPIO_OD_GP31_BYTE_ADDR) |= 0x08;
+	else
+		REG8_VAL(GPIO_OD_GP31_BYTE_ADDR) &= ~0x08;
+}
+#endif
 void pwm_get_env(void)
 {
 	unsigned char buf[100];
@@ -653,7 +671,20 @@ static int pwm_suspend
 		pwm_enable[i] = pwm_get_enable(i);
 	}
 #endif
+
+	// LCD Power
+	if (g_lcd_pw_pin.ctl && g_lcd_pw_pin.oc && g_lcd_pw_pin.od){
+		suspd_lcd_pw[0] = REG32_VAL(g_lcd_pw_pin.ctl);
+		suspd_lcd_pw[1] = REG32_VAL(g_lcd_pw_pin.oc);
+		suspd_lcd_pw[2] = REG32_VAL(g_lcd_pw_pin.od);
+	} 
+
+	suspd_gpio_gp31[0] = REG8_VAL(GPIO_CTRL_GP31_BYTE_ADDR);
+	suspd_gpio_gp31[1] = REG8_VAL(GPIO_OC_GP31_BYTE_ADDR);
+	suspd_gpio_gp31[2] = REG8_VAL(GPIO_OD_GP31_BYTE_ADDR);
+
 	return 0;
+
 } /* End of btm_suspend() */
 
 /*!*************************************************************************
@@ -679,7 +710,20 @@ static int pwm_resume
 		pwm_set_level(i, pwm_level[i]);
 	}
 #endif
+	
+        // LCD Power
+        if (g_lcd_pw_pin.ctl && g_lcd_pw_pin.oc && g_lcd_pw_pin.od){
+                REG32_VAL(g_lcd_pw_pin.ctl) = suspd_lcd_pw[0];
+                REG32_VAL(g_lcd_pw_pin.oc) = suspd_lcd_pw[1];
+                REG32_VAL(g_lcd_pw_pin.od) = suspd_lcd_pw[2];
+        }
+
+        REG8_VAL(GPIO_CTRL_GP31_BYTE_ADDR) = suspd_gpio_gp31[0];
+        REG8_VAL(GPIO_OC_GP31_BYTE_ADDR) = suspd_gpio_gp31[1];
+        REG8_VAL(GPIO_OD_GP31_BYTE_ADDR) = suspd_gpio_gp31[2];
+
 	auto_pll_divisor(DEV_PWM,CLK_ENABLE,0,0);
+
 	return 0;
 } /* End of pwm_resume() */
 
@@ -780,6 +824,9 @@ static int pwm_init(void)
 	auto_pll_divisor(DEV_PWM,CLK_ENABLE,0,0);
 	if (g_pwm_param == 0)
 		pwm_get_env();
+
+	/* Disable PWM0 frequency output to avoid I20 hang situation */
+	PWM0_GPIO_Output_Without_Frequecny_Control(1);
 
 	return ret;
 } /* End of pwm_init() */

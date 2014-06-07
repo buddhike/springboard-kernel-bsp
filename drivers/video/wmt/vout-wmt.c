@@ -36,7 +36,7 @@ vout_mode_t int_vout_mode;
 vpp_timing_t vo_oem_tmr;
 int hdmi_cur_plugin;
 vout_t *vo_poll_vout;
-
+extern vout_t *vout_array[VPP_VOUT_NUM];
 // GPIO 10 & 11
 swi2c_reg_t vo_gpio_scl = {
 	.bit_mask = BIT10,
@@ -95,6 +95,8 @@ int vo_i2c_proc(int id,unsigned int addr,unsigned int index,char *pdata,int len)
 	}
 
 	if( handle ){
+		// Deteting this check will lead to a kernel hang on VT6076	
+		// So if you want to read EDID on VT6078, please use revision '301'(0.9kernel)
 		if( wmt_swi2c_check(handle) ){
 			return -1;
 		}
@@ -329,32 +331,41 @@ static void vo_plug_enable(int enable,void *func,int no)
 #ifdef WMT_FTBLK_VOUT_DVI
 static int vo_dvi_blank(vout_t *vo,vout_blank_t arg)
 {
+	static vout_blank_t pre;
 	DBG_DETAIL("(%d)\n",arg);
-	if( vo->pre_blank == VOUT_BLANK_POWERDOWN ){
+	if( pre == VOUT_BLANK_POWERDOWN ){
 		if( vo->dev ){
 			vo->dev->init(vo);
-#ifdef __KERNEL__
-			if( vo->dev->poll ){
-				vo_set_poll(vo,(vo->dev->poll)?1:0,DVI_POLL_TIME_MS);
-			}
-#endif
 		}
-	}
-#ifdef __KERNEL__
-	if( arg == VOUT_BLANK_POWERDOWN ){
-		vo_set_poll(vo,0,0);
 	}
 
-	// patch for virtual fb,if HDMI plugin then DVI blank
-	if( g_vpp.virtual_display || (g_vpp.dual_display == 0) ){
-		if( vout_chkplug(VPP_VOUT_NUM_HDMI) ){
-			arg = VOUT_BLANK_NORMAL;
-			vout_change_status(vo,VPP_VOUT_STS_BLANK,arg);
+	if( vo->dev && vo->dev->set_power_down ){
+		switch(arg){
+			case VOUT_BLANK_UNBLANK:
+				//printk("[VE]Blank action: UNBLANK.\n");
+				vo->dev->set_power_down(0);
+				break;
+			case VOUT_BLANK_NORMAL:
+				vo->dev->set_power_down(1);
+				//printk("[VE]Blank action: NORMAL.\n");
+				break;
+			case VOUT_BLANK_VSYNC_SUSPEND:
+				//printk("[VE]Blank action: VSYNC_SUSPEND.\n");
+				break;
+			case VOUT_BLANK_HSYNC_SUSPEND:
+				//printk("[VE]Blank action: HSYNC_SUSPEND.\n");
+				break;
+			case VOUT_BLANK_POWERDOWN:
+				vo->dev->set_power_down(1);
+				//printk("[VE]Blank action: POWERDOWN.\n");
+				break;
+			default:
+				;
 		}
 	}
-#endif
+
 	govrh_set_dvo_enable(vo->govr,(arg==VOUT_BLANK_UNBLANK)? 1:0);
-	vo->pre_blank = arg;
+	pre = arg;
 	return 0;
 }
 
@@ -1007,14 +1018,19 @@ int vout_check_display_info(vout_init_parm_t *init_parm)
 					{
 						vout_dev_t *dev;
 						
-						lcd_set_parm(parm[1],parm[2]&0xFF);
+						//lcd_set_parm(parm[1],parm[2]&0xFF);
+						lcd_set_parm(parm[1],parm[2], parm[3], parm[4],parm[5]);
 						dev = lcd_get_dev();
 						vo->ext_dev = dev;
 						vo->dev = dev;
 						dev->vout = vo;
 						vo->option[0] = VDO_COL_FMT_ARGB;
 						vo->option[1] &= ~0xFF;
-						vo->option[1] |= VPP_DATAWIDHT_24;
+						
+						if (parm[1] & 0x1) // DVO output width 
+							vo->option[1] |= VPP_DATAWIDHT_24;
+						else
+							vo->option[1] &= ~VPP_DATAWIDHT_24;
 					}
 					break;
 				case VOUT_LVDS:
@@ -1051,13 +1067,11 @@ int vout_check_display_info(vout_init_parm_t *init_parm)
 							lcd_parm_t *p = 0;
 
 							if( parm[1] ){
-								if( (p = lcd_get_parm(parm[1],parm[2])) ){
-									lcd_set_lvds_id(parm[1]);
-								}
+								p = lcd_get_parm(parm[1],parm[2]);
 							}
 
-							if( p == 0 )
-								p = lcd_get_oem_parm(parm[3],parm[4]);
+							//if( p == 0 )
+							//	p = lcd_get_oem_parm(parm[3],parm[4]);
 							timing = &p->timing;
 						}
 						memcpy(&vo_oem_tmr,timing,sizeof(vpp_timing_t));
@@ -1155,7 +1169,8 @@ void vout_check_ext_device(void)
 	info = vout_get_info_entry(VPP_VOUT_NUM_DVI);
 	if( lcd_get_dev() ){
 		vo->dev->init(vo);
-		vout_info_set_fixed_timing(info->num,&p_lcd->timing);
+		if(p_lcd)
+			vout_info_set_fixed_timing(info->num,&p_lcd->timing);
 	}
 	else if( vo->ext_dev == 0 ){
 		if( wmt_getsyspara("wmt.display.dvi.dev",buf,&varlen) == 0 ){
@@ -1187,7 +1202,7 @@ void vout_check_ext_device(void)
 					}
 
 					// if LCD then set fixed timing
-					if( vo->dev == lcd_get_dev() ){
+					if( vo->dev == lcd_get_dev() && p_lcd){
 						vout_info_set_fixed_timing(info->num,&p_lcd->timing);
 					}
 				}
@@ -1325,6 +1340,7 @@ int vout_init(void)
 	vout_t *vo;
 	int flag;
 	int i;
+	unsigned int status_bak[] = {0, 0};
 	vout_init_parm_t init_parm;
 
 	DBG_DETAIL("Enter\n");
@@ -1342,6 +1358,15 @@ int vout_init(void)
 		vout_check_monitor_resolution(&init_parm);
 	}
 
+	// Bak the blank status in order to restore them
+	status_bak[0] = (vout_array[0]->status) & 0x00000010;
+	status_bak[1] = (vout_array[1]->status) & 0x00000010;
+
+	// In order to support the boot logo no matter what the "wmt.display.param" is, 	
+	// we set the blank status to "0" to avoid each monitor's blanking operation.	
+	vout_array[0]->status &= 0xffffffef;
+	vout_array[1]->status &= 0xffffffef;
+	
 	DBG_DETAIL("Set mode\n");
 	for(i=0;i<VPP_VOUT_NUM;i++){
 		if( (vo = vout_get_entry(i)) ){
@@ -1358,6 +1383,7 @@ int vout_init(void)
 	}
 
 #ifndef CONFIG_UBOOT
+/*
 	if( (init_parm.virtual_display) || (g_vpp.dual_display == 0) ){
 		int plugin;
 		
@@ -1365,7 +1391,7 @@ int vout_init(void)
 		vout_change_status(vout_get_entry(VPP_VOUT_NUM_HDMI),VPP_VOUT_STS_BLANK,(plugin)?0:1);
 		vout_change_status(vout_get_entry(VPP_VOUT_NUM_DVI),VPP_VOUT_STS_BLANK,(plugin)?1:0);
 	}
-
+*/
 	for(i=0;i<VPP_VOUT_NUM;i++){
 		if( (vo = vout_get_entry(i)) ){
 			vout_set_blank((0x1 << i),(vo->status & VPP_VOUT_STS_BLANK)?1:0);
@@ -1373,6 +1399,10 @@ int vout_init(void)
 	}
 #endif
 
+	// Restore the blank status
+	vout_array[0]->status |= status_bak[0];
+	vout_array[1]->status |= status_bak[1];
+	
 	// show vout info
 	for(i=0;i<VPP_VOUT_INFO_NUM;i++){
 		vout_info_t *info;

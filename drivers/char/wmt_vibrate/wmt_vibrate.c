@@ -85,7 +85,8 @@ static struct vibrate_device l_vibratedev = {
 	},
 	/* default reg setting: Use GPIO1 to control motor */
 	.name = 1,
-	.active = 1,
+	//.active = 1,
+	.active = 0,
 	.bmp = 0x2,
 	.ctraddr = GPIO_BASE_ADDR + 0x40,
 	.ocaddr = GPIO_BASE_ADDR + 0x80,

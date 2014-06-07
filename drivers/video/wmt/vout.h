@@ -43,6 +43,10 @@ extern	"C" {
 #define VOUT_INFO_DEFAULT_RESY	768
 #define VOUT_INFO_DEFAULT_FPS	60
 
+#define USING_XORG_TIMING
+
+
+
 /*-------------------- EXPORTED PRIVATE TYPES---------------------------------*/
 /* typedef  void  vo_xxx_t;  *//*Example*/
 typedef enum {
@@ -101,6 +105,9 @@ typedef struct {
 	int fb_xoffset;
 	int fb_yoffset;
 	int fb_clr;
+#endif
+#ifdef USING_XORG_TIMING
+	struct fb_var_screeninfo *var_xorg;
 #endif
 } vout_info_t;
 
@@ -175,6 +182,7 @@ typedef struct vout_s {
 } vout_t;
 
 #define VOUT_INF_CAP_FIX_PLUG	BIT(0)
+
 typedef struct vout_inf_s {
 	vout_inf_mode_t mode;
 	unsigned int capability;
@@ -255,7 +263,6 @@ int vout_check_info(unsigned int mask,vout_info_t *info);
 unsigned int vout_get_mask(	vout_info_t *vo_info);
 void vout_set_int_enable(int enable);
 int vout_get_clr_int(void);
-
 #ifdef	__cplusplus
 }
 #endif	
