@@ -156,7 +156,10 @@ static void option_instat_callback(struct urb *urb);
 #define HUAWEI_PRODUCT_K4511			0x14CC
 #define HUAWEI_PRODUCT_ETS1220			0x1803
 #define HUAWEI_PRODUCT_E353			0x1506
-
+//aron add--------
+#define HUAWEI_PRODUCT_E153     0x1446 
+#define HUAWEI_PRODUCT_E173			0x1C05
+//----------
 #define QUANTA_VENDOR_ID			0x0408
 #define QUANTA_PRODUCT_Q101			0xEA02
 #define QUANTA_PRODUCT_Q111			0xEA03
@@ -468,6 +471,14 @@ static void option_instat_callback(struct urb *urb);
 #define YUGA_PRODUCT_CLU528			0x260D
 #define YUGA_PRODUCT_CLU526			0x260F
 
+/* Add to support USB 3G module, by VIA embedded, 2013.3.19 */
+#define ZU200_VENDOR_ID 			0x1546
+#define ZU200_PRODUCT_ID 			0x1102
+
+#define Novatel_VENDOR_ID 			0x1410
+#define Novatel_PRODUCT_ID 			0xa023
+
+
 /* some devices interfaces need special handling due to a number of reasons */
 enum option_blacklist_reason {
 		OPTION_BLACKLIST_NONE = 0,
@@ -613,6 +624,8 @@ static const struct usb_device_id option_ids[] = {
 	{ USB_DEVICE_AND_INTERFACE_INFO(HUAWEI_VENDOR_ID, HUAWEI_PRODUCT_K4510, 0xff, 0x01, 0x32) },
 	{ USB_DEVICE_AND_INTERFACE_INFO(HUAWEI_VENDOR_ID, HUAWEI_PRODUCT_K4511, 0xff, 0x01, 0x31) },
 	{ USB_DEVICE_AND_INTERFACE_INFO(HUAWEI_VENDOR_ID, HUAWEI_PRODUCT_K4511, 0xff, 0x01, 0x32) },
+	{ USB_DEVICE(HUAWEI_VENDOR_ID, HUAWEI_PRODUCT_E153) }, //aaron add
+	{ USB_DEVICE(HUAWEI_VENDOR_ID, HUAWEI_PRODUCT_E173) },//aron add
 	{ USB_DEVICE_AND_INTERFACE_INFO(HUAWEI_VENDOR_ID, HUAWEI_PRODUCT_E353, 0xff, 0x01, 0x01) },
 	{ USB_DEVICE(NOVATELWIRELESS_VENDOR_ID, NOVATELWIRELESS_PRODUCT_V640) },
 	{ USB_DEVICE(NOVATELWIRELESS_VENDOR_ID, NOVATELWIRELESS_PRODUCT_V620) },
@@ -996,6 +1009,7 @@ static const struct usb_device_id option_ids[] = {
 	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0x0073, 0xff, 0xff, 0xff) },
 	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0x0130, 0xff, 0xff, 0xff) },
 	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0x0141, 0xff, 0xff, 0xff) },
+	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0x2000, 0xff, 0xff, 0xff) }, //aron add.
 	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0x2002, 0xff,
 	  0xff, 0xff), .driver_info = (kernel_ulong_t)&zte_k3765_z_blacklist },
 	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0x2003, 0xff, 0xff, 0xff) },
@@ -1101,6 +1115,9 @@ static const struct usb_device_id option_ids[] = {
 	{ USB_DEVICE(YUGA_VENDOR_ID, YUGA_PRODUCT_CLU516) },
 	{ USB_DEVICE(YUGA_VENDOR_ID, YUGA_PRODUCT_CLU528) },
 	{ USB_DEVICE(YUGA_VENDOR_ID, YUGA_PRODUCT_CLU526) },
+	/* Add to support USB 3G module, by VIA embedded, 2013.3.19 */
+	{ USB_DEVICE(ZU200_VENDOR_ID, ZU200_PRODUCT_ID) },
+	{ USB_DEVICE(Novatel_VENDOR_ID, Novatel_PRODUCT_ID) },
 	{ } /* Terminating entry */
 };
 MODULE_DEVICE_TABLE(usb, option_ids);

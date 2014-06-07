@@ -33,7 +33,12 @@ static DEFINE_MUTEX(start_mutex);
    0 - use performance monitoring hardware if available
    1 - use the timer int mechanism regardless
  */
-static int timer = 0;
+static int timer = 2;
+
+/* 2012-03-08 YJChen: Add Begin */
+extern int wmt_getsyspara(char *varname, unsigned char *varval, int *varlen);
+unsigned int TIMER2_LATCH;
+/* 2012-03-08 YJChen: Add End */
 
 int oprofile_setup(void)
 {
@@ -243,10 +248,57 @@ static int __init oprofile_init(void)
 {
 	int err;
 
+/* 2012-03-08 YJChen: Add Begin */
+    char oprof_env_name[] = "wmt.oprofile.param";
+    char oprof_env_buf[32] = "0";
+    int varlen = 32;
+    int nEnable = 0;
+    int nSampleRate = 0;
+
+    if (wmt_getsyspara(oprof_env_name, oprof_env_buf, &varlen) == 0) {
+        sscanf(oprof_env_buf, "%d:%d", &nEnable, &nSampleRate);
+        printk("wmt.oprofile.param = %d:%d\n", nEnable, nSampleRate);
+        if (nEnable != 1) {
+            printk("setting disable oprofile\n");
+            return -ENODEV;
+        }
+
+        if (nSampleRate == 0) {
+            // default value is 333us
+            nSampleRate = 333;
+        }
+        else if (nSampleRate < 10) {
+            // min value is 10us
+            nSampleRate = 10;
+        }
+        printk("Enable oprofile, Sample Interval = %d usec\n", nSampleRate);
+        TIMER2_LATCH = nSampleRate * 3;
+    }
+    else {
+        // not define wmt.oprofile.param, default disable
+        printk("default disable oprofile\n");
+        return -ENODEV;
+    }
+/* 2012-03-08 YJChen: Add End */
+
 	err = oprofile_arch_init(&oprofile_ops);
 	if (err < 0 || timer) {
+/* 2012-03-08 YJChen: Add Begin */
+        if (timer == 1) {
+/* 2012-03-08 YJChen: Add End */
 		printk(KERN_INFO "oprofile: using timer interrupt.\n");
 		err = oprofile_timer_init(&oprofile_ops);
+/* 2012-03-08 YJChen: Add Begin */
+		}
+		else if (timer == 2) {
+		    printk(KERN_INFO "oprofile: using timer2 interrupt.\n");
+		    err = oprofile_timer2_init(&oprofile_ops);
+		}
+		else {
+		    printk(KERN_INFO "oprofile: cannot use timer interrupt.\n");
+		    return -ENODEV;
+		}
+/* 2012-03-08 YJChen: Add End */
 		if (err)
 			return err;
 	}

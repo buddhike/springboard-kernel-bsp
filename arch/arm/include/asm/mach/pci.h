@@ -81,4 +81,9 @@ extern struct pci_bus *pci_v3_scan_bus(int nr, struct pci_sys_data *);
 extern void pci_v3_preinit(void);
 extern void pci_v3_postinit(void);
 
+/*{JHT+*/
+extern int wmt_pci_setup(int nr, struct pci_sys_data *);
+extern struct pci_bus *wmt_pci_scan_bus(int nr, struct pci_sys_data *);
+/*}JHT+*/
+
 #endif /* __ASM_MACH_PCI_H */

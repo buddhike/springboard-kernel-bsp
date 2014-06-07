@@ -122,6 +122,17 @@ choice
 # Integrated controllers
 #
 
+config USB_GADGET_WMT
+	boolean	"GADGET WMT"
+	select USB_GADGET_SELECTED
+	select USB_GADGET_DUALSPEED
+#	default USB_GADGET
+
+config	USB_WMT
+	boolean	"USB WMT"
+	depends on USB_GADGET_WMT
+#	default USB_GADGET
+
 config USB_GADGET_AT91
 	boolean "Atmel AT91 USB Device Port"
 	depends on ARCH_AT91 && !ARCH_AT91SAM9RL && !ARCH_AT91CAP9 && !ARCH_AT91SAM9G45
@@ -641,9 +652,9 @@ config USB_GADGET_DUALSPEED
 # USB Gadget Drivers
 #
 choice
-	tristate "USB Gadget Drivers"
+	boolean "USB Gadget Drivers"
 	depends on USB_GADGET && USB_GADGET_SELECTED
-	default USB_ETH
+	default USB_G_ANDROID
 	help
 	  A Linux "Gadget Driver" talks to the USB Peripheral Controller
 	  driver through the abstract "gadget" API.  Some other operating

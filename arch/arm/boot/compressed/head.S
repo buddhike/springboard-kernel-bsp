@@ -44,10 +44,15 @@
 #else
 
 #include <mach/debug-macro.S>
+/*
+ *		.macro	writeb,	ch, rb
+ *		senduart \ch, \rb
+ *		.endm
+ */
 
-		.macro	writeb,	ch, rb
-		senduart \ch, \rb
-		.endm
+        .macro  writeb, rb
+        str     \rb, [r3, #0x00]        @ Transmit data register
+        .endm
 
 #if defined(CONFIG_ARCH_SA1100)
 		.macro	loadsp, rb, tmp
@@ -63,6 +68,12 @@
 		mov	\rb, #0x50000000
 		add	\rb, \rb, #0x4000 * CONFIG_S3C_LOWLEVEL_UART_PORT
 		.endm
+#elif defined(CONFIG_ARCH_WMT)
+        .macro loadsp, rb, tmp
+        mov \rb, #0xFE000000        @ wmt register base address
+        add \rb, \rb, #0x00200000   @ uart0 base address offset
+        .endm
+		
 #else
 		.macro	loadsp,	rb, tmp
 		addruart \rb, \tmp
@@ -1065,7 +1076,8 @@ puts:		loadsp	r3, r1
 1:		ldrb	r2, [r0], #1
 		teq	r2, #0
 		moveq	pc, lr
-2:		writeb	r2, r3
+/*2:		writeb	r2, r3*/
+2:		writeb	r2 
 		mov	r1, #0x00020000
 3:		subs	r1, r1, #1
 		bne	3b

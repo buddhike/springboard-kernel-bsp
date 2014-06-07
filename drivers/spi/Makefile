@@ -72,3 +72,6 @@ obj-$(CONFIG_SPI_TLE62X0)	+= tle62x0.o
 
 # SPI slave drivers (protocol for that link)
 # 	... add above this line ...
+#WMT proprietary SPI driver
+obj-$(CONFIG_WMT_NEWSPI_SUPPORT)	+= wmt_spi.o
+obj-$(CONFIG_WMT_NEWSPI1_SUPPORT)	+= wmt_spi_1.o

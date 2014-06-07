@@ -43,5 +43,7 @@ obj-$(CONFIG_REGULATOR_ISL6271A) += isl6271a-regulator.o
 obj-$(CONFIG_REGULATOR_AB8500)	+= ab8500.o
 obj-$(CONFIG_REGULATOR_DB8500_PRCMU) += db8500-prcmu.o
 obj-$(CONFIG_REGULATOR_TPS65910) += tps65910-regulator.o
+obj-$(CONFIG_REGULATOR_WMTGPIO) += wmt-gpio-regulator.o
+obj-$(CONFIG_REGULATOR_UPI6631) += upi6631.o
 
 ccflags-$(CONFIG_REGULATOR_DEBUG) += -DDEBUG

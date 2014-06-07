@@ -24,8 +24,16 @@
 #include <linux/suspend.h>
 #include <linux/syscore_ops.h>
 #include <trace/events/power.h>
+#include <linux/cpufreq.h>
 
 #include "power.h"
+
+unsigned int pm_flags;
+EXPORT_SYMBOL(pm_flags);
+
+#ifdef CONFIG_KEYBOARD_WMT
+extern void wmt_kpad_int_ctrl(int state);
+#endif
 
 const char *const pm_states[PM_SUSPEND_MAX] = {
 #ifdef CONFIG_EARLYSUSPEND
@@ -34,6 +42,8 @@ const char *const pm_states[PM_SUSPEND_MAX] = {
 	[PM_SUSPEND_STANDBY]	= "standby",
 	[PM_SUSPEND_MEM]	= "mem",
 };
+
+extern unsigned int WMT_WAKE_UP_EVENT;
 
 static const struct platform_suspend_ops *suspend_ops;
 
@@ -128,12 +138,19 @@ void __attribute__ ((weak)) arch_suspend_enable_irqs(void)
 	local_irq_enable();
 }
 
+
+extern void pmc_disable_save_wakeup_events(void);
+extern void pmc_enable_wakeup_restore_events(void);
+extern unsigned int var_wakeup_sts;
+extern unsigned int var_during_suspend;
 /**
  *	suspend_enter - enter the desired system sleep state.
  *	@state:		state to enter
  *
  *	This function should be called after devices have been suspended.
  */
+extern int wmt_suspend_target(unsigned, unsigned, unsigned);
+extern char use_dvfs; 
 static int suspend_enter(suspend_state_t state)
 {
 	int error;
@@ -149,6 +166,9 @@ static int suspend_enter(suspend_state_t state)
 		printk(KERN_ERR "PM: Some devices failed to power down\n");
 		goto Platform_finish;
 	}
+
+	if (use_dvfs)
+	  wmt_suspend_target(0, CPUFREQ_RELATION_L, 1);
 
 	if (suspend_ops->prepare_late) {
 		error = suspend_ops->prepare_late();
@@ -199,6 +219,12 @@ static int suspend_enter(suspend_state_t state)
  *				    sleep state.
  *	@state:		  state to enter
  */
+
+extern int wmt_trigger_resume_kpad;
+extern int wmt_trigger_resume_notify;
+extern void wmt_resume_kpad(void);
+extern void wmt_resume_notify(void);
+
 int suspend_devices_and_enter(suspend_state_t state)
 {
 	int error;
@@ -207,12 +233,17 @@ int suspend_devices_and_enter(suspend_state_t state)
 		return -ENOSYS;
 
 	trace_machine_suspend(state);
+	var_wakeup_sts = 0;
+	var_during_suspend = 1;
+	pmc_disable_save_wakeup_events();
 	if (suspend_ops->begin) {
 		error = suspend_ops->begin(state);
 		if (error)
 			goto Close;
 	}
+	/*
 	suspend_console();
+	*/
 	suspend_test_start();
 	error = dpm_suspend_start(PMSG_SUSPEND);
 	if (error) {
@@ -226,13 +257,28 @@ int suspend_devices_and_enter(suspend_state_t state)
 	error = suspend_enter(state);
 
  Resume_devices:
+ 
+	if (wmt_trigger_resume_kpad){
+	  wmt_trigger_resume_kpad=0;
+	  wmt_resume_kpad();
+	}
+	if (wmt_trigger_resume_notify){
+	  wmt_trigger_resume_notify=0;
+	  wmt_resume_notify();
+	}
+
+ 
 	suspend_test_start();
 	dpm_resume_end(PMSG_RESUME);
 	suspend_test_finish("resume devices");
 	resume_console();
+	printk("WMT wake up event %x\n",WMT_WAKE_UP_EVENT);
+	WMT_WAKE_UP_EVENT = 0;
  Close:
 	if (suspend_ops->end)
 		suspend_ops->end();
+	pmc_enable_wakeup_restore_events();
+	var_during_suspend = 0;
 	trace_machine_suspend(PWR_EVENT_EXIT);
 	return error;
 
@@ -256,6 +302,28 @@ static void suspend_finish(void)
 	pm_restore_console();
 }
 
+static int run_suspend(void)
+{
+	int ret;
+	char *argv[] = { "/system/etc/wmt/pm.sh", "", NULL };
+	char *envp[] =
+		{ "HOME=/", "PATH=/sbin:/bin:/usr/sbin:/usr/bin", "ACTION=suspend", NULL };
+
+	ret = call_usermodehelper(argv[0], argv, envp, 1);
+	return ret;
+}
+
+static int run_resume(void)
+{
+	int ret;
+	char *argv[] = { "/system/etc/wmt/pm.sh", "", NULL };
+	char *envp[] =
+		{ "HOME=/", "PATH=/sbin:/bin:/usr/sbin:/usr/bin", "ACTION=resume", NULL };
+
+	ret = call_usermodehelper(argv[0], argv, envp, 1);
+	return ret;
+}
+
 /**
  *	enter_state - Do common work of entering low-power state.
  *	@state:		pm_state structure for state we're entering.
@@ -276,6 +344,8 @@ int enter_state(suspend_state_t state)
 	if (!mutex_trylock(&pm_mutex))
 		return -EBUSY;
 
+	run_suspend();
+	
 	printk(KERN_INFO "PM: Syncing filesystems ... ");
 	sys_sync();
 	printk("done.\n");
@@ -296,6 +366,7 @@ int enter_state(suspend_state_t state)
  Finish:
 	pr_debug("PM: Finishing wakeup.\n");
 	suspend_finish();
+	run_resume();
  Unlock:
 	mutex_unlock(&pm_mutex);
 	return error;

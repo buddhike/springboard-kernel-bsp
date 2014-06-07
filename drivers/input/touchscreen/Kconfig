@@ -679,6 +679,42 @@ config TOUCHSCREEN_TSC2007
 	  To compile this driver as a module, choose M here: the
 	  module will be called tsc2007.
 
+config TOUCHSCREEN_MST
+        tristate "MST Input Driver Support"
+        depends on ARCH_WMT
+        help
+          Say Y here if you have an WMT based board with MST touchscreen
+          attached to it.
+
+          If unsure, say N.
+choice
+    prompt "Type Select"
+        depends on TOUCHSCREEN_MST
+    default MST_TANGOS32_SUPPORT
+config MST_TANGOS32_SUPPORT
+        bool "TANGOS32"
+        ---help---
+          Say Y here if you want to use TANGOS32.
+endchoice
+
+config TOUCHSCREEN_ITE
+        tristate "ITE Input Driver Support"
+        depends on ARCH_WMT
+        help
+          Say Y here if you have an WMT based board with ITE touchscreen
+          attached to it.
+
+          If unsure, say N.
+choice
+    prompt "Type Select"
+        depends on TOUCHSCREEN_ITE
+    default IT7260__SUPPORT
+config IT7260_SUPPORT
+        bool "IT7260"
+        ---help---
+          Say Y here if you want to use IT7260.
+endchoice
+
 config TOUCHSCREEN_W90X900
 	tristate "W90P910 touchscreen driver"
 	depends on HAVE_CLK
@@ -731,5 +767,8 @@ config TOUCHSCREEN_TPS6507X
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called tps6507x_ts.
+
+source "drivers/input/touchscreen/vt1603a_ts/Kconfig"
+source "drivers/input/touchscreen/atmxt768/Kconfig"
 
 endif

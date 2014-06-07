@@ -36,6 +36,22 @@
 #include <asm/fb.h>
 
 
+/* I have to disable fb_notifier_call_chain
+ * in Android 4.0.3,otherwise it will call fb_set_var
+ * again and again and reset var->yoffset to zero.
+ * It makes FBIOPUT_VSCREENINFO cannot work like
+ * FBIOPAN_DISPLAY in Android 4.0.3.
+ * Next, I should check fbcon or any module who may
+ * use fb_set_var, since the root cause must be found.
+ *
+ * -- WonderMedia
+ */
+/*
+#ifdef CONFIG_FRAMEBUFFER_CONSOLE
+#define DISABLE_FB_NOTIFIER_CALL_CHAIN
+#endif
+*/
+
     /*
      *  Frame buffer device initialization and setup routines
      */
@@ -45,6 +61,8 @@
 static DEFINE_MUTEX(registration_lock);
 struct fb_info *registered_fb[FB_MAX] __read_mostly;
 int num_registered_fb __read_mostly;
+
+bool bEGL_swap = false; //fan , for EGLSwapBuffer and vt framebuffer not sync
 
 static struct fb_info *get_fb_info(unsigned int idx)
 {
@@ -493,10 +511,14 @@ static int fb_show_logo_line(struct fb_info *info, int rotate,
 		fb_set_logo(info, logo, logo_new, fb_logo.depth);
 	}
 
-	image.dx = 0;
+/*	image.dx = 0;
 	image.dy = y;
 	image.width = logo->width;
-	image.height = logo->height;
+	image.height = logo->height;*/
+	image.dx = (info->var.xres - fb_logo.logo->width)/2;
+	image.dy = (info->var.yres - fb_logo.logo->height)/2;
+	image.width = fb_logo.logo->width;
+	image.height = fb_logo.logo->height;
 
 	if (rotate) {
 		logo_rotate = kmalloc(logo->width *
@@ -936,7 +958,9 @@ static int fb_check_caps(struct fb_info *info, struct fb_var_screeninfo *var,
 int
 fb_set_var(struct fb_info *info, struct fb_var_screeninfo *var)
 {
+#ifndef DISABLE_FB_NOTIFIER_CALL_CHAIN
 	int flags = info->flags;
+#endif /* DISABLE_FB_NOTIFIER_CALL_CHAIN */
 	int ret = 0;
 
 	if (var->activate & FB_ACTIVATE_INV_MODE) {
@@ -1011,6 +1035,7 @@ fb_set_var(struct fb_info *info, struct fb_var_screeninfo *var)
 			    !list_empty(&info->modelist))
 				ret = fb_add_videomode(&mode, &info->modelist);
 
+#ifndef DISABLE_FB_NOTIFIER_CALL_CHAIN
 			if (!ret && (flags & FBINFO_MISC_USEREVENT)) {
 				struct fb_event event;
 				int evnt = (activate & FB_ACTIVATE_ALL) ?
@@ -1022,6 +1047,7 @@ fb_set_var(struct fb_info *info, struct fb_var_screeninfo *var)
 				event.data = &mode;
 				fb_notifier_call_chain(evnt, &event);
 			}
+#endif /* DISABLE_FB_NOTIFIER_CALL_CHAIN */
 		}
 	}
 
@@ -1080,7 +1106,9 @@ static long do_fb_ioctl(struct fb_info *info, unsigned int cmd,
 			return -ENODEV;
 		console_lock();
 		info->flags |= FBINFO_MISC_USEREVENT;
+		bEGL_swap = true;
 		ret = fb_set_var(info, &var);
+		bEGL_swap = false;
 		info->flags &= ~FBINFO_MISC_USEREVENT;
 		console_unlock();
 		unlock_fb_info(info);

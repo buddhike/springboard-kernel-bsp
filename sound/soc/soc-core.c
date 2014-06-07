@@ -2080,6 +2080,26 @@ int snd_soc_poweroff(struct device *dev)
 }
 EXPORT_SYMBOL_GPL(snd_soc_poweroff);
 
+#if 0
+static void soc_shutdown(struct platform_device *pdev)
+{
+	int i;
+	struct snd_soc_card *card = platform_get_drvdata(pdev);
+	
+	if (!card->instantiated)
+		return;
+
+	/* Flush out pmdown_time work - we actually do want to run it
+	 * now, we're shutting down so no imminent restart. */
+	for (i = 0; i < card->num_rtd; i++) {
+		struct snd_soc_pcm_runtime *rtd = &card->rtd[i];
+		flush_delayed_work_sync(&rtd->delayed_work);
+	}
+
+	snd_soc_dapm_shutdown(card);
+}
+#endif
+
 const struct dev_pm_ops snd_soc_pm_ops = {
 	.suspend = snd_soc_suspend,
 	.resume = snd_soc_resume,
@@ -2096,6 +2116,7 @@ static struct platform_driver soc_driver = {
 	},
 	.probe		= soc_probe,
 	.remove		= soc_remove,
+	//.shutdown	= soc_shutdown,
 };
 
 /* create a new pcm */

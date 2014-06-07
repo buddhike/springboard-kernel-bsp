@@ -31,6 +31,7 @@
 #include <linux/random.h>
 #include <linux/hw_breakpoint.h>
 #include <linux/console.h>
+#include <linux/cpufreq.h>
 
 #include <asm/cacheflush.h>
 #include <asm/processor.h>
@@ -128,8 +129,21 @@ void arm_machine_flush_console(void)
 }
 #endif
 
+extern int wmt_suspend_target(unsigned, unsigned, unsigned);
+extern char use_dvfs;
+extern int wmt_lock_dvfs;
+
 void arm_machine_restart(char mode, const char *cmd)
 {
+	unsigned int tmp, tmp1 = 0x100000;
+	
+	/*
+	if (use_dvfs) {
+	  wmt_lock_dvfs = 1;
+	  wmt_suspend_target(0, CPUFREQ_RELATION_L, 0);	
+	}
+	*/
+	
 	/* Flush the console to make sure all the relevant messages make it
 	 * out to the console drivers */
 	arm_machine_flush_console();
@@ -155,9 +169,35 @@ void arm_machine_restart(char mode, const char *cmd)
 	flush_cache_all();
 
 	/*
+	 * software reset request will reset device divisor
+	 * but will not reset PLLC, we need to set PLLC to default
+	 */
+	while (tmp1) {
+		tmp = PMCS2_VAL;
+		if (!(tmp & 0x7F0038))
+			break;
+
+		tmp1--;
+		if (!tmp1)
+			printk("Set PLLC failed -- check busy halted\n");
+	}
+	PMPMC_VAL = 0x00170003;
+	tmp1 = 0x1000000;
+	while (tmp1) {
+		tmp = PMCS2_VAL;
+		if (!(tmp & 0x7F0038))
+			break;
+			
+		tmp1--;
+		if (!tmp1)
+			printk("Set PLLC failed -- check busy halted\n");
+	}
+
+	/*
 	 * Now call the architecture specific reboot code.
 	 */
-	arch_reset(mode, cmd);
+	//arch_reset(mode, cmd);	
+    arch_reset(mode);
 
 	/*
 	 * Whoops - the architecture was unable to reboot.

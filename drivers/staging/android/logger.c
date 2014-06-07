@@ -17,7 +17,7 @@
  * GNU General Public License for more details.
  */
 
-#include <linux/sched.h>
+//#include <linux/sched.h> 
 #include <linux/module.h>
 #include <linux/fs.h>
 #include <linux/miscdevice.h>
@@ -26,7 +26,7 @@
 #include <linux/slab.h>
 #include <linux/time.h>
 #include "logger.h"
-
+#include <linux/posix-timers.h> 
 #include <asm/ioctls.h>
 
 /*
@@ -37,7 +37,7 @@
  * mutex 'mutex'.
  */
 struct logger_log {
-	unsigned char 		*buffer;/* the ring buffer itself */
+	unsigned char *buffer; /* the ring buffer itself */ 
 	struct miscdevice	misc;	/* misc device representing the log */
 	wait_queue_head_t	wq;	/* wait queue for readers */
 	struct list_head	readers; /* this log's readers */
@@ -76,6 +76,21 @@ struct logger_reader {
  * file->logger_log. Thus what file->private_data points at depends on whether
  * or not the file was opened for reading. This function hides that dirtiness.
  */
+ extern  struct k_clock posix_clocks[]; 
+
+/**
+ * Redirect Android logcat to uart0 if logcat_set != 0
+ */
+static int logcat_set;
+/*getThreadMsec - get the runtime of current thread, add by jay*/
+ uint32_t getThreadMsec(void)
+{
+
+    struct timespec tm;
+
+    posix_clocks[CLOCK_THREAD_CPUTIME_ID].clock_get(CLOCK_THREAD_CPUTIME_ID, &tm);
+    return tm.tv_sec * 1000LL + tm.tv_nsec / 1000000;
+}
 static inline struct logger_log *file_get_log(struct file *file)
 {
 	if (file->f_mode & FMODE_READ) {
@@ -116,7 +131,8 @@ static __u32 get_entry_len(struct logger_log *log, size_t off)
 static ssize_t do_read_log_to_user(struct logger_log *log,
 				   struct logger_reader *reader,
 				   char __user *buf,
-				   size_t count)
+				   size_t count,
+				   bool fReadAttach)
 {
 	size_t len;
 
@@ -126,20 +142,79 @@ static ssize_t do_read_log_to_user(struct logger_log *log,
 	 * the log, whichever comes first.
 	 */
 	len = min(count, log->size - reader->r_off);
-	if (copy_to_user(buf, log->buffer + reader->r_off, len))
-		return -EFAULT;
+	//if (copy_to_user(buf, log->buffer + reader->r_off, len))
+	//	return -EFAULT;
 
 	/*
 	 * Second, we read any remaining bytes, starting back at the head of
 	 * the log.
 	 */
-	if (count != len)
-		if (copy_to_user(buf + len, log->buffer, count - len))
-			return -EFAULT;
-
+	//if (count != len)
+		//if (copy_to_user(buf + len, log->buffer, count - len))
+			//return -EFAULT;
+    if (len < THREADOFFSET)
+	{
+	    if (copy_to_user(buf, log->buffer + reader->r_off, len))
+		    return -EFAULT;
+    	if (copy_to_user(buf + len, log->buffer, THREADOFFSET - len))
+		    return -EFAULT;
+		if (copy_to_user(buf + THREADOFFSET, log->buffer + THREADOFFSET - len + 4, count - THREADOFFSET - THREADTIME_SIZE))
+		    return -EFAULT;
+		if(fReadAttach)
+		{
+		    if (copy_to_user(buf + count - 4, log->buffer + THREADOFFSET - len , THREADTIME_SIZE))
+		        return -EFAULT;
+		}
+    }
+    else if (len == THREADOFFSET)
+    {
+	    if (copy_to_user(buf, log->buffer + reader->r_off, len))
+		    return -EFAULT;
+		if (copy_to_user(buf + THREADOFFSET, log->buffer + 4, count - THREADOFFSET - THREADTIME_SIZE))
+		    return -EFAULT;
+		if(fReadAttach)
+		{
+		    if (copy_to_user(buf + count - 4, log->buffer, THREADTIME_SIZE))
+		        return -EFAULT;
+		}
+		    
+    }
+    else if(len <= THREADOFFSET + THREADTIME_SIZE)
+    {
+	    if (copy_to_user(buf, log->buffer + reader->r_off, THREADOFFSET))
+		    return -EFAULT;
+		if (copy_to_user(buf + THREADOFFSET, log->buffer + THREADOFFSET + THREADTIME_SIZE - len, count - THREADOFFSET - THREADTIME_SIZE))
+		    return -EFAULT;
+        if (fReadAttach)
+        {
+		    if (copy_to_user(buf + count - 4, log->buffer + reader->r_off + THREADOFFSET, len - THREADOFFSET))
+			    return -EFAULT;
+			if (len != THREADOFFSET + THREADTIME_SIZE)
+			{
+		        if (copy_to_user(buf + count - 4 + len - THREADOFFSET, log->buffer, THREADOFFSET + THREADTIME_SIZE - len ))
+			        return -EFAULT;
+			}
+	    }
+    }
+    else
+    {
+	    if (copy_to_user(buf, log->buffer + reader->r_off, THREADOFFSET))
+		    return -EFAULT;
+		if (copy_to_user(buf + THREADOFFSET, log->buffer + reader->r_off + THREADOFFSET + 4, len - THREADOFFSET - THREADTIME_SIZE))
+		    return -EFAULT;
+        if (count != len)
+		    if (copy_to_user(buf + len, log->buffer, count - len))
+			    return -EFAULT;
+		if(fReadAttach)
+		{
+		    if (copy_to_user(buf + count - 4, log->buffer + reader->r_off +THREADOFFSET , THREADTIME_SIZE))
+		        return -EFAULT;
+		}
+    }
 	reader->r_off = logger_offset(reader->r_off + count);
 
-	return count;
+	//return count;
+	return count - 4;
 }
 
 /*
@@ -161,7 +236,7 @@ static ssize_t logger_read(struct file *file, char __user *buf,
 	struct logger_log *log = reader->log;
 	ssize_t ret;
 	DEFINE_WAIT(wait);
-
+    bool fReadAttach;
 start:
 	while (1) {
 		prepare_to_wait(&log->wq, &wait, TASK_INTERRUPTIBLE);
@@ -199,13 +274,20 @@ start:
 
 	/* get the size of the next entry */
 	ret = get_entry_len(log, reader->r_off);
-	if (count < ret) {
+	if (count < ret - THREADTIME_SIZE) {
 		ret = -EINVAL;
 		goto out;
 	}
-
+	else if(count < ret)
+	{
+	    fReadAttach = false;
+	}
+	else
+	{
+	    fReadAttach = true;
+	}
 	/* get exactly one entry from the log */
-	ret = do_read_log_to_user(log, reader, buf, ret);
+	ret = do_read_log_to_user(log, reader, buf, ret, fReadAttach);
 
 out:
 	mutex_unlock(&log->mutex);
@@ -299,9 +381,98 @@ static void do_write_log(struct logger_log *log, const void *buf, size_t count)
  * Returns 'count' on success, negative error code on failure.
  */
 static ssize_t do_write_log_from_user(struct logger_log *log,
-				      const void __user *buf, size_t count)
+				      const void __user *buf, size_t count, int seg)
 {
+	static int abnormal;
+	int i, s, str_len;
+	static struct logger_entry header;
+	static int label;
+	static char tag[20];
+	/* struct timespec now;//modified by essenzhang */
+	struct timeval now;
+	long threadtime;
 	size_t len;
+	if (logcat_set) {
+		switch (seg) {
+		case 2:
+			label = *((char *)buf);
+			abnormal = 0;
+
+			switch (label) {
+			case 2:
+				label = 'V';
+				break; /* VERBOSE */
+			case 3:
+				label = 'D';
+				break; /* DEBUG */
+			case 4:
+				label = 'I';
+				break; /* INFO */
+			case 5:
+				label = 'W';
+				break; /* WARN */
+			case 6:
+				label = 'E';
+				break; /* ERROR */
+			case 7:
+				label = 'A';
+				break; /* ASSERT */
+			default:
+				abnormal = 1;
+				break;
+			}
+			/* now = current_kernel_time();//modified by essenzhang */
+			do_gettimeofday(&now);
+
+			threadtime = getThreadMsec(); /* add by jay */
+
+			header.pid = current->tgid;
+			header.tid = current->pid;
+			/*
+			//header.sec = now.tv_sec;
+			//header.nsec = now.tv_nsec;//modified by essenzhang
+			*/
+			header.sec = now.tv_sec;
+			header.nsec = now.tv_usec*1000;
+
+			header.thread_msec = threadtime; /* add by jay */
+			break;
+		case 1:
+			if (!abnormal)
+				memcpy(tag, buf, count);
+			tag[16] = 0;
+			break;
+		case 0:
+			if (!abnormal) {
+				abnormal = 1;
+
+				for (i = 0, s = 0, str_len = 0 ; i < count ; i++) {
+					str_len++;
+					if (*((char *)buf+i) == 0) {
+						if (str_len > 1) {
+							if (logcat_set == 1)
+								printk(KERN_INFO "%c/%16s(%5d): %s\n", label, tag, header.pid, ((char *)buf+s));
+							else if (logcat_set == 2)
+								printk(KERN_INFO "%06d.%06d %c/%16s(%5d): %s\n", header.sec%1000000, header.nsec/1000, label, tag, header.pid, ((char *)buf+s));
+						}
+						str_len = 0;
+					} else if ((*((char *)buf+i) == 0xa) && (i != count-1)) {
+						*((char *)buf+i) = 0;
+						if (str_len > 1) {
+							if (logcat_set == 1)
+								printk(KERN_INFO "%c/%16s(%5d): %s\n", label, tag, header.pid, ((char *)buf+s));
+							else if (logcat_set == 2)
+								printk(KERN_INFO "%06d.%06d %c/%16s(%5d): %s\n", header.sec%1000000, header.nsec/1000, label, tag, header.pid, ((char *)buf+s));
+						}
+						s = i+1;
+						str_len = 0;
+					}
+				}
+			}
+			break;
+		}
+		return count;
+	}
 
 	len = min(count, log->size - log->w_off);
 	if (len && copy_from_user(log->buffer + log->w_off, buf, len))
@@ -327,15 +498,40 @@ ssize_t logger_aio_write(struct kiocb *iocb, const struct iovec *iov,
 	struct logger_log *log = file_get_log(iocb->ki_filp);
 	size_t orig = log->w_off;
 	struct logger_entry header;
-	struct timespec now;
+	/* //struct timespec now;//modified by essenzhang */
+	struct timeval now;
+	long threadtime;
 	ssize_t ret = 0;
 
-	now = current_kernel_time();
+	if (logcat_set) {
+		mutex_lock(&log->mutex);
+		while (nr_segs-- > 0) {
+			ssize_t nr;
+
+			/* write out this segment's payload */
+			nr = do_write_log_from_user(log, iov->iov_base, iov->iov_len, nr_segs);
+
+			iov++;
+			ret += nr;
+		}
+		mutex_unlock(&log->mutex);
+		return ret;
+	}
+	/* //now = current_kernel_time();//modified by essenzhang */
+       do_gettimeofday(&now); 
+      
+	threadtime = getThreadMsec(); /* add by jay */
 
 	header.pid = current->tgid;
 	header.tid = current->pid;
-	header.sec = now.tv_sec;
-	header.nsec = now.tv_nsec;
+	/*
+	//header.sec = now.tv_sec;
+	//header.nsec = now.tv_nsec;//modified by essenzhang
+	*/
+    header.sec = now.tv_sec;
+	header.nsec = now.tv_usec*1000;
+       
+	header.thread_msec = threadtime; /*add by jay */
 	header.len = min_t(size_t, iocb->ki_left, LOGGER_ENTRY_MAX_PAYLOAD);
 
 	/* null writes succeed, return zero */
@@ -362,7 +558,7 @@ ssize_t logger_aio_write(struct kiocb *iocb, const struct iovec *iov,
 		len = min_t(size_t, iov->iov_len, header.len - ret);
 
 		/* write out this segment's payload */
-		nr = do_write_log_from_user(log, iov->iov_base, len);
+		nr = do_write_log_from_user(log, iov->iov_base, len, nr_segs);
 		if (unlikely(nr < 0)) {
 			log->w_off = orig;
 			mutex_unlock(&log->mutex);
@@ -500,7 +696,7 @@ static long logger_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		}
 		reader = file->private_data;
 		if (log->w_off != reader->r_off)
-			ret = get_entry_len(log, reader->r_off);
+			ret = get_entry_len(log, reader->r_off) - THREADTIME_SIZE;
 		else
 			ret = 0;
 		break;
@@ -521,7 +717,7 @@ static long logger_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	return ret;
 }
 
-static const struct file_operations logger_fops = {
+static struct file_operations logger_fops = {
 	.owner = THIS_MODULE,
 	.read = logger_read,
 	.aio_write = logger_aio_write,
@@ -557,8 +753,8 @@ static struct logger_log VAR = { \
 
 DEFINE_LOGGER_DEVICE(log_main, LOGGER_LOG_MAIN, 256*1024)
 DEFINE_LOGGER_DEVICE(log_events, LOGGER_LOG_EVENTS, 256*1024)
-DEFINE_LOGGER_DEVICE(log_radio, LOGGER_LOG_RADIO, 256*1024)
-DEFINE_LOGGER_DEVICE(log_system, LOGGER_LOG_SYSTEM, 256*1024)
+DEFINE_LOGGER_DEVICE(log_radio, LOGGER_LOG_RADIO, 64*1024) //256 to 64 by eason
+/* DEFINE_LOGGER_DEVICE(log_system, LOGGER_LOG_SYSTEM, 256*1024) */
 
 static struct logger_log *get_log_from_minor(int minor)
 {
@@ -568,8 +764,8 @@ static struct logger_log *get_log_from_minor(int minor)
 		return &log_events;
 	if (log_radio.misc.minor == minor)
 		return &log_radio;
-	if (log_system.misc.minor == minor)
-		return &log_system;
+/*	if (log_system.misc.minor == minor)  // by eason
+		return &log_system;*/ 
 	return NULL;
 }
 
@@ -594,6 +790,21 @@ static int __init logger_init(void)
 {
 	int ret;
 
+	extern int wmt_getsyspara(char *varname, unsigned char *varval, int *varlen);
+	char logcat_name[] = "wmt.logcat.param";
+	char logcat_val[20] = "0";
+	int varlen = 20, enable = 0xff, setting = 0xff;
+
+	/**
+	 * wmt.logcat.param = 1:0 ==> logcat (logcat_set = 1)
+	 * wmt.logcat.param = 1:1 ==> logcat -v time  (logcat_set = 2)
+	 */
+	if (wmt_getsyspara(logcat_name, logcat_val, &varlen) == 0) {
+		sscanf(logcat_val, "%x:%x", &enable, &setting);
+		if (enable & 1)
+			logcat_set = setting + 1;
+	}
+	printk(KERN_INFO "log enable:%X, setting:%X\n", enable, setting);
 	ret = init_log(&log_main);
 	if (unlikely(ret))
 		goto out;
@@ -606,9 +817,9 @@ static int __init logger_init(void)
 	if (unlikely(ret))
 		goto out;
 
-	ret = init_log(&log_system);
+/*	ret = init_log(&log_system); //by eason
 	if (unlikely(ret))
-		goto out;
+		goto out; */
 
 out:
 	return ret;

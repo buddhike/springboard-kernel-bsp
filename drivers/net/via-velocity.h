@@ -1096,6 +1096,14 @@ struct mac_regs {
 
 	volatile __le16 PatternCRC[8];	/* 0xB0 */
 	volatile __le32 ByteMask[4][4];	/* 0xC0 */
+    volatile u8 PCI_CFG_SPACE[0x58];	/* 0x100  */
+	volatile __le32 VEE_CFG;				/* 0x158 */
+	volatile __le32 VEE_CFG1;				/* 0x15C */
+	volatile u8 Mac_Mode0;				/* 0x160 */
+	volatile u8 Mac_Resv;				/* 0x161 */
+	volatile u8 Mac_Mode2;				/* 0x162 */
+	volatile u8 Mac_Mode3;				/* 0x163 */
+
 };
 
 

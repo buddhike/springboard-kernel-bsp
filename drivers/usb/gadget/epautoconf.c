@@ -258,6 +258,34 @@ struct usb_ep *usb_ep_autoconfig (
 		if (ep && ep_matches (gadget, ep, desc))
 			return ep;
 
+	} else if (gadget_is_wmt (gadget)) {
+printk(KERN_INFO "usb_ep_autoconfig find wmt_gadget \n");
+		if (USB_ENDPOINT_XFER_INT == type) {
+			/* single buffering is enough */
+			printk(KERN_INFO "usb_ep_autoconfig try to find ep3in-int \n");
+			ep = find_ep (gadget, "ep3in-int");
+			if (ep && ep_matches (gadget, ep, desc)){
+				printk(KERN_INFO "usb_ep_autoconfig found ep3in-int \n");
+				return ep;
+			}
+		} else if (USB_ENDPOINT_XFER_BULK == type
+				&& (USB_DIR_IN & desc->bEndpointAddress)) {
+			/* DMA may be available */
+			printk(KERN_INFO "usb_ep_autoconfig try to find ep1in-bulk \n");
+			ep = find_ep (gadget, "ep1in-bulk");
+			if (ep && ep_matches (gadget, ep, desc)){
+				printk(KERN_INFO "usb_ep_autoconfig found ep1in-bulk \n");
+				return ep;
+			}
+		} else if (USB_ENDPOINT_XFER_BULK == type) {
+			/* DMA may be available */
+			printk(KERN_INFO "usb_ep_autoconfig try to find ep2out-bulk \n");
+			ep = find_ep (gadget, "ep2out-bulk");
+			if (ep && ep_matches (gadget, ep, desc)){
+				printk(KERN_INFO "usb_ep_autoconfig found ep2out-bulk \n");
+				return ep;
+			}
+		}
 	} else if (gadget_is_goku (gadget)) {
 		if (USB_ENDPOINT_XFER_INT == type) {
 			/* single buffering is enough */

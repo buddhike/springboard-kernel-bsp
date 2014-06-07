@@ -410,6 +410,7 @@ static int mtp_create_bulk_endpoints(struct mtp_dev *dev,
 	ep->driver_data = dev;		/* claim the endpoint */
 	dev->ep_out = ep;
 
+#if 0
 	ep = usb_ep_autoconfig(cdev->gadget, out_desc);
 	if (!ep) {
 		DBG(cdev, "usb_ep_autoconfig for ep_out failed\n");
@@ -418,6 +419,7 @@ static int mtp_create_bulk_endpoints(struct mtp_dev *dev,
 	DBG(cdev, "usb_ep_autoconfig for mtp ep_out got %s\n", ep->name);
 	ep->driver_data = dev;		/* claim the endpoint */
 	dev->ep_out = ep;
+#endif
 
 	ep = usb_ep_autoconfig(cdev->gadget, intr_desc);
 	if (!ep) {
@@ -427,6 +429,9 @@ static int mtp_create_bulk_endpoints(struct mtp_dev *dev,
 	DBG(cdev, "usb_ep_autoconfig for mtp ep_intr got %s\n", ep->name);
 	ep->driver_data = dev;		/* claim the endpoint */
 	dev->ep_intr = ep;
+
+printk(KERN_INFO "mtp usb_ep_autoconfig for mtp ep_intr got %s \n",ep->name);	
+printk(KERN_INFO "mtp usb_ep_autoconfig endpoint int add=%x \n",intr_desc->bEndpointAddress);	
 
 	/* now allocate requests for our endpoints */
 	for (i = 0; i < TX_REQ_MAX; i++) {
@@ -450,6 +455,8 @@ static int mtp_create_bulk_endpoints(struct mtp_dev *dev,
 		req->complete = mtp_complete_intr;
 		mtp_req_put(dev, &dev->intr_idle, req);
 	}
+
+printk(KERN_INFO "mtp usb_ep_autoconfig endpoint 2 int add=%x \n",intr_desc->bEndpointAddress);	
 
 	return 0;
 
@@ -478,6 +485,10 @@ static ssize_t mtp_read(struct file *fp, char __user *buf,
 		dev->state != STATE_OFFLINE);
 	if (ret < 0) {
 		r = ret;
+		if (r == -ERESTARTSYS){
+			r = -EIO;
+		}
+		
 		goto done;
 	}
 	spin_lock_irq(&dev->lock);
@@ -506,7 +517,11 @@ requeue_req:
 	/* wait for a request to complete */
 	ret = wait_event_interruptible(dev->read_wq, dev->rx_done);
 	if (ret < 0) {
-		r = ret;
+		r = ret;		
+		if (r == -ERESTARTSYS){
+			r = -EIO;
+		}
+			
 		usb_ep_dequeue(dev->ep_out, req);
 		goto done;
 	}
@@ -1082,6 +1097,10 @@ mtp_function_bind(struct usb_configuration *c, struct usb_function *f)
 	dev->cdev = cdev;
 	DBG(cdev, "mtp_function_bind dev: %p\n", dev);
 
+printk(KERN_INFO "mtp mtp_function_bind endpoint 1 in add=%x \n",mtp_fullspeed_in_desc.bEndpointAddress);	
+printk(KERN_INFO "mtp mtp_function_bind endpoint 1 out add=%x \n",mtp_highspeed_out_desc.bEndpointAddress);	
+printk(KERN_INFO "mtp mtp_function_bind endpoint 1 int add=%x \n",mtp_intr_desc.bEndpointAddress);	
+
 	/* allocate interface ID(s) */
 	id = usb_interface_id(c, f);
 	if (id < 0)
@@ -1101,6 +1120,14 @@ mtp_function_bind(struct usb_configuration *c, struct usb_function *f)
 		mtp_highspeed_out_desc.bEndpointAddress =
 			mtp_fullspeed_out_desc.bEndpointAddress;
 	}
+
+printk(KERN_INFO "mtp mtp_function_bind endpoint in add=%x \n",mtp_fullspeed_in_desc.bEndpointAddress);	
+printk(KERN_INFO "mtp mtp_function_bind endpoint out add=%x \n",mtp_highspeed_out_desc.bEndpointAddress);	
+printk(KERN_INFO "mtp mtp_function_bind endpoint int add=%x \n",mtp_intr_desc.bEndpointAddress);	
+
+//mtp_fullspeed_in_desc.bEndpointAddress=0x81;
+//mtp_highspeed_out_desc.bEndpointAddress=0x02;
+//mtp_intr_desc.bEndpointAddress=0x83;
 
 	DBG(cdev, "%s speed %s: IN/%s, OUT/%s\n",
 			gadget_is_dualspeed(c->cdev->gadget) ? "dual" : "full",

@@ -131,8 +131,20 @@ do {									\
 #define IFACE_MAX_CNT 		2
 
 #define WL_SCAN_TIMER_INTERVAL_MS	8000 /* Scan timeout */
-#define WL_CHANNEL_SYNC_RETRY 	5
+#define WL_CHANNEL_SYNC_RETRY 	3
+#define WL_ACT_FRAME_RETRY 4
+
 #define WL_INVALID 		-1
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 2, 0) && defined(PNO_SUPPORT) && 0
+#define WL_SCHED_SCAN	1
+#endif
+
+/* Bring down SCB Timeout to 20secs from 60secs default */
+#ifndef WL_SCB_TIMEOUT
+#define WL_SCB_TIMEOUT 20
+#endif
+
 
 /* driver status */
 enum wl_status {
@@ -447,14 +459,15 @@ struct wl_priv {
 #endif /* WL_SCHED_SCAN */
 	bool sched_scan_running;	/* scheduled scan req status */
 	u16 hostapd_chan;            /* remember chan requested by framework for hostapd  */
+	u16 deauth_reason;           /* Place holder to save deauth/disassoc reasons */
 };
+
 
 static inline struct wl_bss_info *next_bss(struct wl_scan_results *list, struct wl_bss_info *bss)
 {
 	return bss = bss ?
 		(struct wl_bss_info *)((uintptr) bss + dtoh32(bss->length)) : list->bss_info;
 }
-
 static inline s32
 wl_alloc_netinfo(struct wl_priv *wl, struct net_device *ndev,
 	struct wireless_dev * wdev, s32 mode)
@@ -475,7 +488,6 @@ wl_alloc_netinfo(struct wl_priv *wl, struct net_device *ndev,
 	}
 	return err;
 }
-
 static inline void
 wl_dealloc_netinfo(struct wl_priv *wl, struct net_device *ndev)
 {
@@ -492,8 +504,8 @@ wl_dealloc_netinfo(struct wl_priv *wl, struct net_device *ndev)
 			kfree(_net_info);
 		}
 	}
-}
 
+}
 static inline void
 wl_delete_all_netinfo(struct wl_priv *wl)
 {
@@ -507,7 +519,6 @@ wl_delete_all_netinfo(struct wl_priv *wl)
 	}
 	wl->iface_cnt = 0;
 }
-
 static inline bool
 wl_get_status_all(struct wl_priv *wl, s32 status)
 
@@ -521,7 +532,6 @@ wl_get_status_all(struct wl_priv *wl, s32 status)
 	}
 	return cnt? true: false;
 }
-
 static inline void
 wl_set_status_by_netdev(struct wl_priv *wl, s32 status,
 	struct net_device *ndev, u32 op)
@@ -545,6 +555,7 @@ wl_set_status_by_netdev(struct wl_priv *wl, s32 status,
 		}
 
 	}
+
 }
 
 static inline u32
@@ -572,6 +583,7 @@ wl_get_mode_by_netdev(struct wl_priv *wl, struct net_device *ndev)
 	return -1;
 }
 
+
 static inline void
 wl_set_mode_by_netdev(struct wl_priv *wl, struct net_device *ndev,
 	s32 mode)
@@ -583,7 +595,6 @@ wl_set_mode_by_netdev(struct wl_priv *wl, struct net_device *ndev,
 					_net_info->mode = mode;
 	}
 }
-
 static inline struct wl_profile *
 wl_get_profile_by_netdev(struct wl_priv *wl, struct net_device *ndev)
 {
@@ -643,7 +654,7 @@ extern s32 wl_cfg80211_down(void *para);
 extern s32 wl_cfg80211_notify_ifadd(struct net_device *ndev, s32 idx, s32 bssidx,
 	void* _net_attach);
 extern s32 wl_cfg80211_ifdel_ops(struct net_device *net);
-extern s32 wl_cfg80211_notify_ifdel(struct net_device *ndev);
+extern s32 wl_cfg80211_notify_ifdel(void);
 extern s32 wl_cfg80211_is_progress_ifadd(void);
 extern s32 wl_cfg80211_is_progress_ifchange(void);
 extern s32 wl_cfg80211_is_progress_ifadd(void);
@@ -659,5 +670,6 @@ extern int wl_cfg80211_hang(struct net_device *dev, u16 reason);
 extern s32 wl_mode_to_nl80211_iftype(s32 mode);
 int wl_cfg80211_do_driver_init(struct net_device *net);
 void wl_cfg80211_enable_trace(int level);
+extern s32 wl_update_wiphybands(struct wl_priv *wl);
 extern s32 wl_cfg80211_if_is_group_owner(void);
 #endif				/* _wl_cfg80211_h_ */

@@ -316,6 +316,7 @@ static int __init create_bulk_endpoints(struct acc_dev *dev,
 	ep->driver_data = dev;		/* claim the endpoint */
 	dev->ep_in = ep;
 
+#if 0
 	ep = usb_ep_autoconfig(cdev->gadget, out_desc);
 	if (!ep) {
 		DBG(cdev, "usb_ep_autoconfig for ep_out failed\n");
@@ -324,6 +325,7 @@ static int __init create_bulk_endpoints(struct acc_dev *dev,
 	DBG(cdev, "usb_ep_autoconfig for ep_out got %s\n", ep->name);
 	ep->driver_data = dev;		/* claim the endpoint */
 	dev->ep_out = ep;
+#endif
 
 	ep = usb_ep_autoconfig(cdev->gadget, out_desc);
 	if (!ep) {
@@ -382,6 +384,10 @@ static ssize_t acc_read(struct file *fp, char __user *buf,
 	ret = wait_event_interruptible(dev->read_wq, dev->online);
 	if (ret < 0) {
 		r = ret;
+		if (r == -ERESTARTSYS){
+			r = -EIO;
+		}
+		
 		goto done;
 	}
 
@@ -402,6 +408,10 @@ requeue_req:
 	ret = wait_event_interruptible(dev->read_wq, dev->rx_done);
 	if (ret < 0) {
 		r = ret;
+		if (r == -ERESTARTSYS){
+			r = -EIO;
+		}
+		
 		usb_ep_dequeue(dev->ep_out, req);
 		goto done;
 	}

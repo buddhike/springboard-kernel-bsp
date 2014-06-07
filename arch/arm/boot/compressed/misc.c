@@ -27,7 +27,7 @@ unsigned int __machine_arch_type;
 #include <asm/string.h>
 
 
-static void putstr(const char *ptr);
+/* static void putstr(const char *ptr); */
 extern void error(char *x);
 
 #include <mach/uncompress.h>
@@ -88,6 +88,7 @@ static void icedcc_putc(int ch)
 #define putc(ch)	icedcc_putc(ch)
 #endif
 
+#if 0
 static void putstr(const char *ptr)
 {
 	char c;
@@ -100,7 +101,7 @@ static void putstr(const char *ptr)
 
 	flush();
 }
-
+#endif
 
 void *memcpy(void *__dest, __const void *__src, size_t __n)
 {

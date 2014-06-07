@@ -350,6 +350,12 @@ static int rx_copybreak = 200;
 module_param(rx_copybreak, int, 0644);
 MODULE_PARM_DESC(rx_copybreak, "Copy breakpoint for copy-only-tiny-frames");
 
+#ifdef VELOCITY_DEBUG
+void velocity_print_mac_context(void);
+#else
+#define	velocity_print_mac_context()	do {} while (0)
+#endif
+
 /*
  *	Internal board variants. At the moment we have only one
  */
@@ -639,9 +645,12 @@ static void safe_disable_mii_autopoll(struct mac_regs __iomem *regs)
 	/*  turn off MAUTO */
 	writeb(0, &regs->MIICR);
 	for (ww = 0; ww < W_MAX_TIMEOUT; ww++) {
-		udelay(1);
 		if (BYTE_REG_BITS_IS_ON(MIISR_MIDLE, &regs->MIISR))
-			break;
+			break;		
+		/* for PHY may linked at 10, and previous MAUTO
+		 * may just enabled, HW takes 4 ms to IDLE state
+		 */
+		mdelay(1);
 	}
 }
 
@@ -655,6 +664,7 @@ static void safe_disable_mii_autopoll(struct mac_regs __iomem *regs)
 static void enable_mii_autopoll(struct mac_regs __iomem *regs)
 {
 	int ii;
+#if 0
 
 	writeb(0, &(regs->MIICR));
 	writeb(MIIADR_SWMPL, &regs->MIIADR);
@@ -664,6 +674,7 @@ static void enable_mii_autopoll(struct mac_regs __iomem *regs)
 		if (BYTE_REG_BITS_IS_ON(MIISR_MIDLE, &regs->MIISR))
 			break;
 	}
+#endif
 
 	writeb(MIICR_MAUTO, &regs->MIICR);
 
@@ -672,6 +683,7 @@ static void enable_mii_autopoll(struct mac_regs __iomem *regs)
 		if (!BYTE_REG_BITS_IS_ON(MIISR_MIDLE, &regs->MIISR))
 			break;
 	}
+
 
 }
 
@@ -697,7 +709,8 @@ static int velocity_mii_read(struct mac_regs __iomem *regs, u8 index, u16 *data)
 
 	BYTE_REG_BITS_ON(MIICR_RCMD, &regs->MIICR);
 
-	for (ww = 0; ww < W_MAX_TIMEOUT; ww++) {
+	for (ww = 0; ww < W_MAX_TIMEOUT; ww++) {	
+		udelay(100);
 		if (!(readb(&regs->MIICR) & MIICR_RCMD))
 			break;
 	}
@@ -782,7 +795,7 @@ static int velocity_mii_write(struct mac_regs __iomem *regs, u8 mii_addr, u16 da
 
 	/* W_MAX_TIMEOUT is the timeout period */
 	for (ww = 0; ww < W_MAX_TIMEOUT; ww++) {
-		udelay(5);
+		udelay(100);
 		if (!(readb(&regs->MIICR) & MIICR_WCMD))
 			break;
 	}
@@ -847,6 +860,16 @@ static u32 check_connection_type(struct mac_regs __iomem *regs)
 	u32 status = 0;
 	u8 PHYSR0;
 	u16 ANAR;
+
+	if (MII_REG_BITS_IS_ON(BMCR_ANENABLE, MII_BMCR, regs)) {
+		velocity_mii_read(regs, MII_ADVERTISE, &ANAR);
+		if ((ANAR & (ADVERTISE_100FULL | ADVERTISE_100HALF | ADVERTISE_10FULL | ADVERTISE_10HALF))
+		    == (ADVERTISE_100FULL | ADVERTISE_100HALF | ADVERTISE_10FULL | ADVERTISE_10HALF)) {
+			if (MII_REG_BITS_IS_ON(ADVERTISE_1000HALF | ADVERTISE_1000FULL, MII_CTRL1000, regs))
+				status |= VELOCITY_AUTONEG_ENABLE;
+		}
+	}
+	
 	PHYSR0 = readb(&regs->PHYSR0);
 
 	/*
@@ -863,15 +886,6 @@ static u32 check_connection_type(struct mac_regs __iomem *regs)
 		status |= VELOCITY_SPEED_10;
 	else
 		status |= VELOCITY_SPEED_100;
-
-	if (MII_REG_BITS_IS_ON(BMCR_ANENABLE, MII_BMCR, regs)) {
-		velocity_mii_read(regs, MII_ADVERTISE, &ANAR);
-		if ((ANAR & (ADVERTISE_100FULL | ADVERTISE_100HALF | ADVERTISE_10FULL | ADVERTISE_10HALF))
-		    == (ADVERTISE_100FULL | ADVERTISE_100HALF | ADVERTISE_10FULL | ADVERTISE_10HALF)) {
-			if (MII_REG_BITS_IS_ON(ADVERTISE_1000HALF | ADVERTISE_1000FULL, MII_CTRL1000, regs))
-				status |= VELOCITY_AUTONEG_ENABLE;
-		}
-	}
 
 	return status;
 }
@@ -1362,18 +1376,19 @@ static void velocity_init_registers(struct velocity_info *vptr,
 		 */
 		velocity_soft_reset(vptr);
 		mdelay(5);
-
+		/*
 		mac_eeprom_reload(regs);
 		for (i = 0; i < 6; i++)
 			writeb(vptr->dev->dev_addr[i], &(regs->PAR[i]));
-
+		*/
 		/*
 		 *	clear Pre_ACPI bit.
 		 */
 		BYTE_REG_BITS_OFF(CFGA_PACPI, &(regs->CFGA));
+		/*
 		mac_set_rx_thresh(regs, vptr->options.rx_thresh);
 		mac_set_dma_length(regs, vptr->options.DMA_length);
-
+		*/
 		writeb(WOLCFG_SAM | WOLCFG_SAB, &regs->WOLCFGSet);
 		/*
 		 *	Back off algorithm use original IEEE standard
@@ -1395,7 +1410,9 @@ static void velocity_init_registers(struct velocity_info *vptr,
 		 */
 		enable_mii_autopoll(regs);
 
-		setup_adaptive_interrupts(vptr);
+		//setup_adaptive_interrupts(vptr);		
+		vptr->int_mask = INT_MASK_DEF;
+
 
 		writel(vptr->rx.pool_dma, &regs->RDBaseLo);
 		writew(vptr->options.numrx - 1, &regs->RDCSize);
@@ -1857,7 +1874,7 @@ static void velocity_error(struct velocity_info *vptr, int status)
 			else
 				BYTE_REG_BITS_ON(TESTCFG_HBDIS, &regs->TESTCFG);
 
-			setup_queue_timers(vptr);
+			//setup_queue_timers(vptr);
 		}
 		/*
 		 *	Get link status from PHYSR0
@@ -2120,7 +2137,7 @@ static int velocity_rx_srv(struct velocity_info *vptr, int budget_left)
 	int rd_curr = vptr->rx.curr;
 	int works = 0;
 
-	while (works < budget_left) {
+	do {
 		struct rx_desc *rd = vptr->rx.ring + rd_curr;
 
 		if (!vptr->rx.info[rd_curr].skb)
@@ -2151,8 +2168,7 @@ static int velocity_rx_srv(struct velocity_info *vptr, int budget_left)
 		rd_curr++;
 		if (rd_curr >= vptr->options.numrx)
 			rd_curr = 0;
-		works++;
-	}
+	} while (++works <= 15);
 
 	vptr->rx.curr = rd_curr;
 
@@ -2746,6 +2762,21 @@ static int __devinit velocity_found1(struct pci_dev *pdev, const struct pci_devi
 	struct velocity_info *vptr;
 	struct mac_regs __iomem *regs;
 	int ret = -ENOMEM;
+	
+	char eth_env_name[] = "wmt.eth.param";
+	char eth_env_val[20] = "0";
+	int varlen = 5;
+	unsigned int eth;
+	extern int wmt_getsyspara(char *varname, unsigned char *varval, int *varlen);
+	if(wmt_getsyspara(eth_env_name,eth_env_val,&varlen) == 0) {
+		sscanf(eth_env_val,"%X",&eth);
+		if(!(eth & 0x10)) {
+			printk("Configure VIA Velocity driver disabled \n");
+			return -ENODEV;
+		}
+	}else {
+		// not define wmt.eth.param default enable mac driver
+	}
 
 	/* FIXME: this driver, like almost all other ethernet drivers,
 	 * can support more than MAX_UNITS.
@@ -3023,12 +3054,18 @@ static void velocity_save_context(struct velocity_info *vptr, struct velocity_co
 
 	for (i = MAC_REG_PAR; i < MAC_REG_CR0_CLR; i += 4)
 		*((u32 *) (context->mac_reg + i)) = readl(ptr + i);
+	
+	for  (i = MAC_REG_MAR; i <= MAC_REG_IMR; i += 4)
+		*((u32 *) (context->mac_reg + i)) = readl(ptr + i);
 
 	for (i = MAC_REG_MAR; i < MAC_REG_TDCSR_CLR; i += 4)
 		*((u32 *) (context->mac_reg + i)) = readl(ptr + i);
 
 	for (i = MAC_REG_RDBASE_LO; i < MAC_REG_FIFO_TEST0; i += 4)
 		*((u32 *) (context->mac_reg + i)) = readl(ptr + i);
+
+	/* Save PCI configure space BMEN */
+		*((u8 *) (context->mac_reg + 0x104)) = readb(ptr + 0x104);
 
 }
 
@@ -3091,7 +3128,7 @@ static void velocity_restore_context(struct velocity_info *vptr, struct velocity
 		writeb(*((u8 *) (context->mac_reg + i)), ptr + i);
 	}
 
-	for (i = MAC_REG_MAR; i < MAC_REG_IMR; i += 4)
+	for (i = MAC_REG_MAR; i <= MAC_REG_IMR; i += 4)
 		writel(*((u32 *) (context->mac_reg + i)), ptr + i);
 
 	for (i = MAC_REG_RDBASE_LO; i < MAC_REG_FIFO_TEST0; i += 4)
@@ -3099,27 +3136,38 @@ static void velocity_restore_context(struct velocity_info *vptr, struct velocity
 
 	for (i = MAC_REG_TDCSR_SET; i <= MAC_REG_RDCSR_SET; i++)
 		writeb(*((u8 *) (context->mac_reg + i)), ptr + i);
+	
+	/* Restore PCI configure space BMEN */
+	writeb(*((u8 *) (context->mac_reg + 0x104)), ptr + 0x104);
 }
 
 static int velocity_resume(struct pci_dev *pdev)
 {
 	struct net_device *dev = pci_get_drvdata(pdev);
 	struct velocity_info *vptr = netdev_priv(dev);
+	struct mac_regs __iomem * regs = vptr->mac_regs;
 	unsigned long flags;
 	int i;
-
 	if (!netif_running(vptr->dev))
 		return 0;
+
+	
+	/* PCI configure space offset 0x154: Power state config to D0 */
+	BYTE_REG_BITS_OFF(0x03, &regs->PCI_CFG_SPACE[0x54]);
 
 	pci_set_power_state(pdev, PCI_D0);
 	pci_enable_wake(pdev, 0, 0);
 	pci_restore_state(pdev);
 
-	mac_wol_reset(vptr->mac_regs);
+	/*mac_wol_reset(vptr->mac_regs);*/
 
 	spin_lock_irqsave(&vptr->lock, flags);
 	velocity_restore_context(vptr, &vptr->context);
+	
 	velocity_init_registers(vptr, VELOCITY_INIT_WOL);
+	/* clear PME_EN status, [PMCSR] offset 0x155 */
+	BYTE_REG_BITS_ON(0x80, &regs->PCI_CFG_SPACE[0x55]);
+
 	mac_disable_int(vptr->mac_regs);
 
 	velocity_tx_srv(vptr);
@@ -3350,6 +3398,24 @@ static int velocity_ethtool_set_wol(struct net_device *dev, struct ethtool_wolin
 	memcpy(vptr->wol_passwd, wol->sopass, 6);
 	return 0;
 }
+
+#ifdef VELOCITY_DEBUG
+void 
+velocity_print_mac_context() {
+	unsigned int i;
+	printk("\n            0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F\n");
+	printk("==========================================================");
+	for (i =0;i<0x200;i++)
+	{
+		if((i%16 ==0 ))
+		{
+			printk("\n");
+			printk("0xd8004%03x:",i);
+		}
+		printk("%02X ", *(volatile unsigned char *)(ETHERNET_MAC_0_CFG_BASE_ADDR + i));
+	}
+}
+#endif
 
 static u32 velocity_get_msglevel(struct net_device *dev)
 {

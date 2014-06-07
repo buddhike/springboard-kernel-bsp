@@ -179,10 +179,11 @@ static int part_get_fact_prot_info(struct mtd_info *mtd, struct otp_info *buf,
 	struct mtd_part *part = PART(mtd);
 	return part->master->get_fact_prot_info(part->master, buf, len);
 }
-
+extern uint32_t part_wr;
 static int part_write(struct mtd_info *mtd, loff_t to, size_t len,
 		size_t *retlen, const u_char *buf)
 {
+	int ret;
 	struct mtd_part *part = PART(mtd);
 	if (!(mtd->flags & MTD_WRITEABLE))
 		return -EROFS;
@@ -190,8 +191,12 @@ static int part_write(struct mtd_info *mtd, loff_t to, size_t len,
 		len = 0;
 	else if (to + len > mtd->size)
 		len = mtd->size - to;
-	return part->master->write(part->master, to + part->offset,
+	
+	part_wr = 1;
+	ret = part->master->write(part->master, to + part->offset,
 				    len, retlen, buf);
+	part_wr = 0;
+	return ret;
 }
 
 static int part_panic_write(struct mtd_info *mtd, loff_t to, size_t len,

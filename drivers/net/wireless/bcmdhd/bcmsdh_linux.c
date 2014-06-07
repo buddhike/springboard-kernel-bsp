@@ -81,6 +81,9 @@ static bcmsdh_driver_t drvinfo = {NULL, NULL};
 /* debugging macros */
 #define SDLX_MSG(x)
 
+extern void wmt_set_wifi_irq(int);
+extern int wmt_is_wifi_irq(void); 
+
 /**
  * Checks to see if vendor and device IDs match a supported SDIO Host Controller.
  */
@@ -176,7 +179,7 @@ int bcmsdh_probe(struct device *dev)
 	irq_flags =
 		IORESOURCE_IRQ | IORESOURCE_IRQ_HIGHLEVEL | IORESOURCE_IRQ_SHAREABLE;
 #else
-	 irq_flags = IRQF_TRIGGER_FALLING;
+	 irq_flags = IRQF_SHARED;
 #endif /* HW_OOB */
 
 	/* Get customer specific OOB IRQ parametres: IRQ number as IRQ type */
@@ -512,6 +515,21 @@ bcmsdh_pci_remove(struct pci_dev *pdev)
 
 extern int sdio_function_init(void);
 
+extern int sdio_func_reg_notify(void* semaphore);
+extern void sdio_func_unreg_notify(void);
+
+#if defined(BCMLXSDMMC)
+int bcmsdh_reg_sdio_notify(void* semaphore)
+{
+	return sdio_func_reg_notify(semaphore);
+}
+
+void bcmsdh_unreg_sdio_notify(void)
+{
+	sdio_func_unreg_notify();
+}
+#endif /* defined(BCMLXSDMMC) */
+
 int
 bcmsdh_register(bcmsdh_driver_t *driver)
 {
@@ -566,10 +584,13 @@ void bcmsdh_oob_intr_set(bool enable)
 
 	spin_lock_irqsave(&sdhcinfo->irq_lock, flags);
 	if (curstate != enable) {
-		if (enable)
-			enable_irq(sdhcinfo->oob_irq);
-		else
-			disable_irq_nosync(sdhcinfo->oob_irq);
+		if (enable) {
+			wmt_set_wifi_irq(1);
+			//enable_irq(sdhcinfo->oob_irq);
+		} else {
+			wmt_set_wifi_irq(0);
+			//disable_irq_nosync(sdhcinfo->oob_irq);
+		}
 		curstate = enable;
 	}
 	spin_unlock_irqrestore(&sdhcinfo->irq_lock, flags);
@@ -579,18 +600,20 @@ static irqreturn_t wlan_oob_irq(int irq, void *dev_id)
 {
 	dhd_pub_t *dhdp;
 
-	dhdp = (dhd_pub_t *)dev_get_drvdata(sdhcinfo->dev);
+	if (wmt_is_wifi_irq()) {
+		dhdp = (dhd_pub_t *)dev_get_drvdata(sdhcinfo->dev);
 
-	bcmsdh_oob_intr_set(0);
+		bcmsdh_oob_intr_set(0);
 
-	if (dhdp == NULL) {
-		SDLX_MSG(("Out of band GPIO interrupt fired way too early\n"));
+		if (dhdp == NULL) {
+			SDLX_MSG(("Out of band GPIO interrupt fired way too early\n"));
+			return IRQ_HANDLED;
+		}
+
+		dhdsdio_isr((void *)dhdp->bus);
 		return IRQ_HANDLED;
-	}
-
-	dhdsdio_isr((void *)dhdp->bus);
-
-	return IRQ_HANDLED;
+	} else
+		return IRQ_NONE;
 }
 
 int bcmsdh_register_oob_intr(void * dhdp)
@@ -608,11 +631,12 @@ int bcmsdh_register_oob_intr(void * dhdp)
 			(int)sdhcinfo->oob_irq, (int)sdhcinfo->oob_flags));
 		/* Refer to customer Host IRQ docs about proper irqflags definition */
 		error = request_irq(sdhcinfo->oob_irq, wlan_oob_irq, sdhcinfo->oob_flags,
-			"bcmsdh_sdmmc", NULL);
+			"bcmsdh_sdmmc", sdhcinfo->dev);
 		if (error)
 			return -ENODEV;
 
-		enable_irq_wake(sdhcinfo->oob_irq);
+		wmt_set_wifi_irq(1);
+		//enable_irq_wake(sdhcinfo->oob_irq);
 		sdhcinfo->oob_irq_registered = TRUE;
 		sdhcinfo->oob_irq_enable_flag = TRUE;
 	}
@@ -626,11 +650,13 @@ void bcmsdh_set_irq(int flag)
 		SDLX_MSG(("%s Flag = %d", __FUNCTION__, flag));
 		sdhcinfo->oob_irq_enable_flag = flag;
 		if (flag) {
-			enable_irq(sdhcinfo->oob_irq);
-			enable_irq_wake(sdhcinfo->oob_irq);
+			wmt_set_wifi_irq(1);
+			//enable_irq(sdhcinfo->oob_irq);
+			//enable_irq_wake(sdhcinfo->oob_irq);
 		} else {
-			disable_irq_wake(sdhcinfo->oob_irq);
-			disable_irq(sdhcinfo->oob_irq);
+			wmt_set_wifi_irq(0);
+			//disable_irq_wake(sdhcinfo->oob_irq);
+			//disable_irq(sdhcinfo->oob_irq);
 		}
 	}
 }

@@ -954,6 +954,11 @@ config AR7_WDT
 	help
 	  Hardware driver for the TI AR7 Watchdog Timer.
 
+config WMT_WATCHDOG
+        tristate "WonderMedia Watch Dog"
+        help
+          WonderMedia Watch Dog driver Support.
+
 config TXX9_WDT
 	tristate "Toshiba TXx9 Watchdog Timer"
 	depends on CPU_TX39XX || CPU_TX49XX

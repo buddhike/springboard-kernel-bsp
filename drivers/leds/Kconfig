@@ -24,6 +24,13 @@ config LEDS_CLASS
 
 comment "LED drivers"
 
+config WMT_LCD_BACKLIGHT
+	tristate "LCD Backlight Support using WMT PWM outputs"
+	depends on LEDS_CLASS && PWM_WMT
+	help
+	  This option enables support for LCD backlight driven using
+	  outputs of the dedicated PWM controller found on WMT SOCs.
+
 config LEDS_88PM860X
 	tristate "LED Support for Marvell 88PM860x PMIC"
 	depends on LEDS_CLASS

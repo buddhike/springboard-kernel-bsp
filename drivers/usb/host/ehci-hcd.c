@@ -111,7 +111,6 @@ MODULE_PARM_DESC (park, "park setting; 1-3 back-to-back async packets");
 static int ignore_oc = 0;
 module_param (ignore_oc, bool, S_IRUGO);
 MODULE_PARM_DESC (ignore_oc, "ignore bogus hardware overcurrent indications");
-
 /* for link power management(LPM) feature */
 static unsigned int hird;
 module_param(hird, int, S_IRUGO);
@@ -126,6 +125,11 @@ MODULE_PARM_DESC(hird, "host initiated resume duration, +1 for each 75us\n");
 #include "pci-quirks.h"
 
 /*-------------------------------------------------------------------------*/
+
+extern unsigned int usb_storage_id;
+extern int wmt_getsyspara(char *varname, unsigned char *varval, int *varlen);	
+unsigned int usb_param[2] = {0xff};
+unsigned char uhcd_sus = 0;
 
 static void
 timer_action(struct ehci_hcd *ehci, enum ehci_timer_action action)
@@ -555,7 +559,16 @@ static int ehci_init(struct usb_hcd *hcd)
 	int			retval;
 	u32			hcc_params;
 	struct ehci_qh_hw	*hw;
-
+	char usb_env_name[] = "wmt.usb.param";
+	char usb_env_val[20] = "0";
+	int varlen = 20;	
+	
+	char usb_env_pmc_name[] = "wmt.pmc.param";
+	char usb_env_pmc_val[40] = "0";
+	int varpmclen = 40;	
+	unsigned int usb_pmc_param[4];
+	
+	
 	spin_lock_init(&ehci->lock);
 
 	/*
@@ -659,7 +672,36 @@ static int ehci_init(struct usb_hcd *hcd)
 		temp |= hird << 24;
 	}
 	ehci->command = temp;
-
+	if(wmt_getsyspara(usb_env_name, usb_env_val, &varlen) == 0) {						
+			sscanf(usb_env_val,"%X:%X", &usb_param[0],&usb_param[1]);
+			//printk("usb_param[0]  =%x ,usb_param[1]=%x \n",usb_param[0],usb_param[1]);
+			if (usb_param[0] & 0x01) {	
+				if(usb_param[1] <= 0x03 ) {
+					usb_storage_id = usb_param[1]+1;	
+					//printk("usb_storage_id  =%x , it should be small than or equal  4 .\n",usb_storage_id);
+				} else {
+						usb_storage_id = 2;// default port B
+				}
+			} else {			
+				usb_storage_id=0;  //disable
+ 			}		
+	}	
+	
+	if(wmt_getsyspara(usb_env_pmc_name, usb_env_pmc_val, &varpmclen) == 0) {						
+			sscanf(usb_env_pmc_val,"%X:%X:%X:%X", &usb_pmc_param[0],&usb_pmc_param[1], &usb_pmc_param[2],&usb_pmc_param[3]);
+			//printk("usb_param[0]  =%x ,usb_param[1]=%x \n",usb_param[0],usb_param[1]);
+			if (usb_pmc_param[0]) {	
+				if(usb_pmc_param[1] & 0x00300000) {
+					uhcd_sus = 1;	
+					//printk("usb_storage_id  =%x , it should be small than or equal  4 .\n",usb_storage_id);
+				} else {
+						uhcd_sus = 0;// default port B
+				}
+			} else {			
+				uhcd_sus=0;  //disable
+ 			}		
+	}		
+	
 	/* Accept arbitrarily long scatter-gather lists */
 	if (!(hcd->driver->flags & HCD_LOCAL_MEM))
 		hcd->self.sg_tablesize = ~0;

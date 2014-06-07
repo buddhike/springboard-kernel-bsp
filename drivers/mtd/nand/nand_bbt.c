@@ -67,6 +67,7 @@
 #include <linux/bitops.h>
 #include <linux/delay.h>
 #include <linux/vmalloc.h>
+#include <mach/hardware.h> //add by vincent
 
 static int check_pattern_no_oob(uint8_t *buf, struct nand_bbt_descr *td)
 {
@@ -157,7 +158,7 @@ static int check_pattern(uint8_t *buf, int len, int paglen, struct nand_bbt_desc
  * no optional empty check
  *
 */
-static int check_short_pattern(uint8_t *buf, struct nand_bbt_descr *td)
+static int check_short_pattern(uint8_t *buf, struct nand_bbt_descr *td, int ano_bytes)
 {
 	int i;
 	uint8_t *p = buf;
@@ -166,6 +167,16 @@ static int check_short_pattern(uint8_t *buf, struct nand_bbt_descr *td)
 	for (i = 0; i < td->len; i++) {
 		if (p[td->offs + i] != td->pattern[i])
 			return -1;
+	}
+	if (ano_bytes) {
+		//printk("sandisk flash");
+		for (i = 0; i < ano_bytes; i++) {
+			//printk("of=0x%x da=0x%x len=%x\n", td->offs + i, p[td->offs + i], td->len);
+			if (p[i] != td->pattern[0]) {
+				printk("p[%d]=0x%x of=0x%x da=0x%x len=%x\n", i, p[i], td->offs + i, p[td->offs + i], td->len);
+					return -1;
+				}
+		}
 	}
 	/* Need to check location 1 AND 6? */
 	if (td->options & NAND_BBT_SCANBYTE1AND6) {
@@ -235,7 +246,9 @@ static int read_bbt(struct mtd_info *mtd, uint8_t *buf, int page, int num,
 			from += marker_len;
 			marker_len = 0;
 		}
+		//printk(KERN_WARNING "nand_bbt: reading bad block table\n");
 		res = mtd->read(mtd, from, len, &retlen, buf);
+		//printk(KERN_WARNING "nand_bbt: reading bad block table retlen=%d\n",retlen);
 		if (res < 0) {
 			if (retlen != len) {
 				printk(KERN_INFO "nand_bbt: Error reading bad block table\n");
@@ -262,6 +275,7 @@ static int read_bbt(struct mtd_info *mtd, uint8_t *buf, int page, int num,
 				 * message to MTD_DEBUG_LEVEL0 */
 				printk(KERN_DEBUG "nand_read_bbt: Bad block at 0x%012llx\n",
 				       (loff_t)((offs << 2) + (act >> 1)) << this->bbt_erase_shift);
+				printk("Bad block at %d\n", (offs << 2) + (act >> 1));
 				/* Factory marked bad or worn out ? */
 				if (tmp == 0)
 					this->bbt[offs + (act >> 3)] |= 0x3 << (act & 0x06);
@@ -306,6 +320,119 @@ static int read_abs_bbt(struct mtd_info *mtd, uint8_t *buf, struct nand_bbt_desc
 	} else {
 		res = read_bbt(mtd, buf, td->pages[0],
 				mtd->size >> this->bbt_erase_shift, td, 0);
+		if (res)
+			return res;
+	}
+	return 0;
+}
+
+extern void print_nand_buffer(char *value, unsigned int length);
+/**
+ * read_retry_table - [GENERIC] Read the retry table starting from page
+ * @mtd:	MTD device structure
+ * @buf:	temporary buffer
+ * @page:	the starting page
+ * @num:	the number of bbt descriptors to read
+ * @td:		the bbt describtion table
+ * @offs:	offset in the memory table
+ *
+ * Read the read retry table starting from page.
+ *
+ */
+static int read_retry_table(struct mtd_info *mtd, uint8_t *buf, int page, int chip)
+{
+	int res;
+	struct nand_chip *this = mtd->priv;
+	struct nand_read_retry_param *rdtry;
+	size_t retlen;
+	loff_t from;
+
+	from = ((loff_t) page) << this->page_shift;
+
+	res = mtd->read(mtd, from, mtd->writesize, &retlen, buf);
+	if (res < 0) {
+		if (retlen != mtd->writesize) {
+			printk(KERN_INFO "nand_bbt: Error reading retry table\n");
+			return res;
+		}
+		printk(KERN_WARNING "nand_bbt: ECC error while reading retry table\n");
+	}
+
+	/* Analyse data */
+	rdtry = (struct nand_read_retry_param *)buf;
+	#ifdef RETRY_DEBUG
+	print_nand_buffer((uint8_t *)this->cur_chip, sizeof(chip_table[0]));
+	#endif
+	if (strcmp("readretry", rdtry->magic) /*|| info->data_ecc_uncor_err == 2*/) {
+		printk(KERN_WARNING "nand_bbt: retry table magic number wrong%s\n", rdtry->magic);
+		return -1;
+	}
+	#ifdef RETRY_DEBUG
+	printk(KERN_WARNING "nand_bbt: copy from buf\n");
+	#endif
+	memcpy(/*(uint8_t *)*/this->cur_chip, buf, sizeof(chip_table[0])-16);
+	this->cur_chip->retry_def_value[this->cur_chip->retry_reg_num] = 0xff;
+	this->cur_chip->retry_def_value[this->cur_chip->retry_reg_num+1] = 0xff;
+	#ifdef RETRY_DEBUG
+	print_nand_buffer((uint8_t *)this->cur_chip, sizeof(chip_table[0]));
+	#endif
+	
+	/*if (rdtry->eslc_reg_num) {
+		if (rdtry->eslc_reg_num > 5)
+			printk(KERN_WARNING "nand_bbt: eslc reg size=%d is too big\n", rdtry->eslc_reg_num);
+		this->eslc_reg_num = rdtry->eslc_reg_num;
+		this->eslc_cmd = kzalloc(this->eslc_reg_num, GFP_KERNEL);
+		if (!this->eslc_cmd) {
+			printk(KERN_ERR "nand_scan_bbt: create eslc_cmd Out of memory\n");
+			return -ENOMEM;
+		}
+	}
+	memcpy(this->eslc_cmd, ((uint8_t *)&rdtry->retry_reg_num)+4, this->eslc_reg_num);
+	print_nand_buffer(this->eslc_cmd, this->eslc_reg_num);
+
+	if (rdtry->total_retry_cnt && rdtry->retry_reg_num) {
+		if ((rdtry->total_retry_cnt * rdtry->retry_reg_num) > 64)
+			printk(KERN_WARNING "nand_bbt: eslc reg size=%d is too big\n",
+			(rdtry->total_retry_cnt * rdtry->retry_reg_num));
+		this->total_retry_cnt = rdtry->total_retry_cnt;
+		this->retry_reg_num = rdtry->retry_reg_num;
+		this->retry_cmd = kzalloc((this->retry_reg_num*this->total_retry_cnt), GFP_KERNEL);
+		if (!this->retry_cmd) {
+			printk(KERN_ERR "nand_scan_bbt: create retry_cmd Out of memory\n");
+			return -ENOMEM;
+		}
+	}
+	memcpy(this->retry_cmd, ((uint8_t *)&rdtry->retry_reg_num)+4+this->eslc_reg_num,
+	(this->retry_reg_num*this->total_retry_cnt));
+
+
+	for (i = 0; i < this->total_retry_cnt; i++) {
+		print_nand_buffer(&this->retry_cmd[i*this->retry_reg_num], this->retry_reg_num);
+	}*/
+
+	return 0;
+}
+
+/**
+ * read_abs_retry_table - [GENERIC] Read the retry table starting at a given page
+ * @mtd:	MTD device structure
+ * @buf:	temporary buffer
+ * @td:		descriptor for the bad block table
+ * @chip:	read the table for a specific chip, -1 read all chips.
+ *
+ * Read the retry table for all chips starting at a given page
+*/
+static int read_abs_retry_table(struct mtd_info *mtd, uint8_t *buf, struct nand_bbt_descr *td, int chip)
+{
+	//struct nand_chip *this = mtd->priv;
+	int res = 0, i, chips;
+	
+	//chips = this->numchips
+	chips = 1;
+
+	for (i = 0; i < chips; i++) {
+		if (chip == -1 || chip == i)
+			res = read_retry_table(mtd, buf, td->pages[i], chip);
 		if (res)
 			return res;
 	}
@@ -463,7 +590,7 @@ static int scan_block_fast(struct mtd_info *mtd, struct nand_bbt_descr *bd,
 			   loff_t offs, uint8_t *buf, int len)
 {
 	struct mtd_oob_ops ops;
-	int j, ret;
+	int j, ret, more_bytes = 0;
 
 	ops.ooblen = mtd->oobsize;
 	ops.oobbuf = buf;
@@ -471,20 +598,38 @@ static int scan_block_fast(struct mtd_info *mtd, struct nand_bbt_descr *bd,
 	ops.datbuf = NULL;
 	ops.mode = MTD_OOB_PLACE;
 
+	if ((mtd->id>>24) == 0x45) {
+		more_bytes = mtd->writesize+mtd->oobsize;
+	}
 	for (j = 0; j < len; j++) {
 		/*
 		 * Read the full oob until read_oob is fixed to
 		 * handle single byte reads for 16 bit
 		 * buswidth
 		 */
-		ret = mtd->read_oob(mtd, offs, &ops);
+		/* Dannier Chen patch 2010.04.20: start
+		check invalid bad block on which page of blocks 
+		should be based on flash spec, for example flash type:HY27UT088G2M-T(P) bad block
+		is marked at page 125 and 127 of each block.
+		NOT always page 0 and 1.
+		*/
+		//printk("scan_block_fast: bd->page_offset[0]=%d offset[1]=%d\n ", bd->page_offset[0], bd->page_offset[1]);
+#ifdef CONFIG_MTD_NAND_WMT_HWECC
+		ret = mtd->read_bbinfo_facmk(mtd, offs + bd->page_offset[j]*mtd->writesize, &ops);
+#else		
+                ret = mtd->read_oob(mtd, offs + bd->page_offset[j]*mtd->writesize, &ops);
+#endif
 		if (ret)
 			return ret;
 
-		if (check_short_pattern(buf, bd))
+		if (check_short_pattern(buf, bd, more_bytes))
 			return 1;
 
-		offs += mtd->writesize;
+		if (mtd->id == 0xECDED57E && mtd->id2 == 0x68440000)
+			if (check_short_pattern(buf+1, bd, more_bytes))
+				return 1;
+		/*offs += mtd->writesize;*/
+		/* Dannier Chen patch 2010.04.20: end */
 	}
 	return 0;
 }
@@ -568,13 +713,126 @@ static int create_bbt(struct mtd_info *mtd, uint8_t *buf,
 			printk(KERN_WARNING "Bad eraseblock %d at 0x%012llx\n",
 			       i >> 1, (unsigned long long)from);
 			mtd->ecc_stats.badblocks++;
-		}
+			
+            /* edwardwan add for debug 20071229 start */
+#if 0
+           if(mtd->ecc_stats.badblocks > 10){
+               printk("\rnand flash bad block number is greater than 10\n");
+               return 0;
+           }
+            /* edwardwan add for debug 20071229 end */
+#endif
+		} else { /* dannierchen add to erase good block when first creat table 20091014 */
+			//printk(KERN_INFO "create_bbt: erase good blocks\n");
+			struct erase_info einfo;
+			int res = 0;
+			memset(&einfo, 0, sizeof(einfo));
+			einfo.mtd = mtd;
+			einfo.addr = from;
+			einfo.len = 1 << this->bbt_erase_shift;
+			//printk("einfo.addr is %x\n",einfo.addr);
+			//printk("einfo.len is %x\n",einfo.len);
+			res = nand_erase_nand(mtd, &einfo, 0xFF);
+			if (res < 0)
+				printk("enand_erase_nand addr 0x%llx result is %x\n", einfo.addr, res);
+		} /* end of dannierchen erase 20091014 */
 
 		i += 2;
 		from += (1 << this->bbt_erase_shift);
 	}
+#if 0 //vincent test
+	int  numblocks, startblock;
+		numblocks = mtd->size >> (this->bbt_erase_shift - 1);
+		startblock = 0;
+	for (i = startblock; i < numblocks/4;) {
+		uint8_t dat;
+
+			dat = this->bbt[i ] ;
+			printk("Bad block table this->bbt[ %d] = %d\n",
+			       i , dat);
+			
+
+		i ++;
+	}
+#endif  //vincent test
 	return 0;
 }
+
+int create_hynix_table(struct mtd_info *mtd, int chip)
+{
+	int res;
+	res = mtd->get_para(mtd, chip);
+	
+	return res;
+}
+
+static int check_retry_pattern(uint8_t *buf, int paglen, struct nand_bbt_descr *td)
+{
+	int i;
+	uint8_t *p = buf+paglen;
+
+	for (i = 0; i < 10; i++) {
+		if (p[i] != td->pattern[i])
+			return -1;
+	}
+	return 0;
+}
+/*
+*
+* read oob to search retry table
+*
+*/
+
+static int search_hynix_retry_table(struct mtd_info *mtd, uint8_t *buf, struct nand_bbt_descr *td)
+{
+	struct nand_chip *this = mtd->priv;
+	int i, chips;
+	int startblock, block, dir;
+	int bbtblocks;
+	int blocktopage = this->bbt_erase_shift - this->page_shift;
+
+	/* Search direction top -> down ? */
+	//if (td->options & NAND_BBT_LASTBLOCK) {
+		startblock = (mtd->size >> this->bbt_erase_shift) - 1;
+		dir = -1;
+	/*} else {
+		startblock = 0;
+		dir = 1;
+	}*/
+
+	//so far use first chip parameter for read retry on 2-die chip
+	//chips = this->numchips;
+	chips = 1;
+	
+	bbtblocks = this->chipsize >> this->bbt_erase_shift;
+	startblock &= bbtblocks - 5;
+
+	for (i = 0; i < chips; i++) {
+		td->pages[i] = -1;
+		/* Scan the maximum number of blocks */
+		for (block = 0; block < td->maxblocks; block++) {
+
+			int actblock = startblock + dir * block;
+			loff_t offs = (loff_t)actblock << this->bbt_erase_shift;
+
+			/* Read first page */
+			scan_read_raw(mtd, buf, offs, mtd->writesize, td);
+
+			if (!check_retry_pattern(buf, mtd->writesize, this->retry_pattern)) {
+				td->pages[i] = actblock << blocktopage;
+				break;
+			}
+		}
+		startblock += this->chipsize >> this->bbt_erase_shift;
+	}
+	/* Check, if we found a bbt for each requested chip */
+	for (i = 0; i < chips; i++) {
+		if (td->pages[i] == -1)
+			printk(KERN_WARNING "Retry block table not found for chip %d\n", i);
+	}
+	return 0;
+}
+
 
 /**
  * search_bbt - [GENERIC] scan the device for a specific bad block table
@@ -639,8 +897,9 @@ static int search_bbt(struct mtd_info *mtd, uint8_t *buf, struct nand_bbt_descr 
 			if (!check_pattern(buf, scanlen, mtd->writesize, td)) {
 				td->pages[i] = actblock << blocktopage;
 				if (td->options & NAND_BBT_VERSION) {
-					offs = bbt_get_ver_offs(mtd, td);
-					td->version[i] = buf[offs];
+					u32 offs_ver;
+					offs_ver = bbt_get_ver_offs(mtd, td);
+					td->version[i] = buf[offs_ver];
 				}
 				break;
 			}
@@ -750,7 +1009,24 @@ static int write_bbt(struct mtd_info *mtd, uint8_t *buf,
 			startblock = chip * numblocks;
 			dir = 1;
 		}
+//Vincent test begin
+#if 0
+	struct erase_info einfo;
+        memset(&einfo, 0, sizeof(einfo));
+	//to =( startblock + dir * 3)<< this->bbt_erase_shift;
+	to =0;
+        einfo.mtd = mtd;
+        einfo.addr = to;
+	//einfo.len = 4 << this->bbt_erase_shift;
+	einfo.len = this->chipsize - (4 << this->phys_erase_shift);
 
+        printk("einfo.addr is %x\n",einfo.addr);
+        printk("einfo.len is %x\n",einfo.len);
+	res = nand_erase_nand(mtd, &einfo, 0xFF);
+	if (res < 0)
+   	     printk("enand_erase_nand result is %x\n",res);
+#endif
+//Vincent test end
 		for (i = 0; i < td->maxblocks; i++) {
 			int block = startblock + dir * i;
 			/* Check, if the block is bad */
@@ -851,6 +1127,14 @@ static int write_bbt(struct mtd_info *mtd, uint8_t *buf,
 			ooboffs = len;
 			/* Pattern is located in oob area of first page */
 			memcpy(&buf[ooboffs + td->offs], td->pattern, td->len);
+#if 0  /* edwardwan debug  */
+                       printk("ooboff is %d\n",ooboffs);
+                       printk("td->off is %d\n",td->offs);
+                       for(i=0; i < td->len; i++) {
+                           printk("pattern is %x\n",(td->pattern)[i]);
+                       }                      
+#endif
+
 		}
 
 		if (td->options & NAND_BBT_VERSION)
@@ -877,6 +1161,7 @@ static int write_bbt(struct mtd_info *mtd, uint8_t *buf,
 		if (res < 0)
 			goto outerr;
 
+            //    printk("it is writing BBT to nand flash and bbt page addr is %d\n",page);
 		res = scan_write_bbt(mtd, to, len, buf,
 				td->options & NAND_BBT_NO_OOB ? NULL :
 				&buf[len]);
@@ -894,6 +1179,134 @@ static int write_bbt(struct mtd_info *mtd, uint8_t *buf,
  outerr:
 	printk(KERN_WARNING
 	       "nand_bbt: Error while writing bad block table %d\n", res);
+	return res;
+}
+
+void copy_retry_info_to_buf(struct mtd_info *mtd, uint8_t *buf)
+{
+	/*uint8_t *bf;
+	struct nand_read_retry_param *rdtry = (struct nand_read_retry_param *)buf;*/
+	struct nand_chip *this = mtd->priv;
+	
+	memcpy(buf, /*(uint8_t *)*/this->cur_chip, sizeof(chip_table[0])-16);
+	#ifdef RETRY_DEBUG
+	print_nand_buffer((uint8_t *)this->cur_chip, sizeof(chip_table[0]));
+	#endif
+
+	/*
+	memcpy(buf, "ANDROID!", 8);
+	rdtry->nand_id = FlashId;//this->nand_id;
+	//rdtry->nand_id_5th = this->nand_id_5th;
+	rdtry->eslc_reg_num = this->eslc_reg_num;
+	rdtry->total_retry_cnt = this->total_retry_cnt;
+	rdtry->retry_reg_num = this->retry_reg_num;
+	bf = buf + 28;
+	if (this->eslc_reg_num)
+		memcpy(bf, this->eslc_cmd, this->eslc_reg_num);
+	bf = buf + this->eslc_reg_num;
+	if (this->retry_reg_num)
+		memcpy(bf, this->retry_cmd, this->retry_reg_num * this->total_retry_cnt);
+	else
+		printk("no retry param is writen to retry table block\n");
+	
+	printk("save rdtry to block\n");
+	print_nand_buffer(buf, 128);
+	*/
+}
+
+/**
+ * write_hynix_table - [GENERIC] (Re)write the hynix table
+ *
+ * @mtd:	MTD device structure
+ * @buf:	temporary buffer
+ * @td:		descriptor for the retry table block
+ * @md:		descriptor for the bad block table mirror
+ * @chipsel:	selector for a specific chip, -1 for all
+ *
+ * (Re)write the bad block table
+ *
+*/
+static int write_hynix_table(struct mtd_info *mtd, uint8_t *buf,
+		     struct nand_bbt_descr *td, int chipsel)
+{
+	struct nand_chip *this = mtd->priv;
+	struct erase_info einfo;
+	int i, res, chip = 0;
+	int startblock, dir, page, numblocks, nrchips;
+	uint8_t rcode = td->reserved_block_code;
+	size_t len = 0;
+	loff_t to;
+	struct mtd_oob_ops ops;
+
+	ops.ooblen = mtd->oobsize;
+	ops.ooboffs = 0;
+	ops.datbuf = NULL;
+	ops.mode = MTD_OOB_PLACE;
+
+	if (!rcode)
+		rcode = 0xff;
+
+	numblocks = (int)(this->chipsize >> this->bbt_erase_shift);
+	nrchips = chipsel + 1;
+	chip = chipsel;
+
+	/* Loop through the chips */
+	for (; chip < nrchips; chip++) {
+
+		/* Search direction top -> down ? */
+			startblock = numblocks * (chip + 1) - 5;
+			dir = -1;
+
+		for (i = 0; i < td->maxblocks; i++) {
+			int block = startblock + dir * i;
+			/* Check, if the block is bad */
+			switch ((this->bbt[block >> 2] >>
+				 (2 * (block & 0x03))) & 0x03) {
+			case 0x01:
+			case 0x03:
+				continue;
+			}
+			page = block << (this->bbt_erase_shift - this->page_shift);
+			goto write;
+		}
+		printk(KERN_ERR "No space left to write read retry table\n");
+		return -ENOSPC;
+	write:
+
+		to = ((loff_t) page) << this->page_shift;
+		len = mtd->writesize;
+		/* Preset the buffer with 0xff */
+		memset(buf, 0xff, len + (len >> this->page_shift)* mtd->oobsize);
+		/* Pattern is located in oob area of first page */
+		memcpy(&buf[len], td->pattern, 10);
+
+		//------write signature into buf retry into--/
+		#ifdef RETRY_DEBUG
+		printk("save rdtry to page=0x%x\n", page);
+		#endif
+		copy_retry_info_to_buf(mtd, buf);
+
+		//------erase block-----------/
+		memset(&einfo, 0, sizeof(einfo));
+		einfo.mtd = mtd;
+		einfo.addr = to;
+		einfo.len = 1 << this->bbt_erase_shift;
+		res = nand_erase_nand(mtd, &einfo, 1);
+		if (res < 0)
+			goto outerr;
+		printk("writing rdtry to nand flash and page addr is 0x%x, len=0x%x\n", page, len);
+		res = scan_write_bbt(mtd, to, len, buf, &buf[len]);
+		if (res < 0)
+			goto outerr;
+
+		/* Mark it as used */
+		td->pages[chip] = page;
+	}
+	return 0;
+
+ outerr:
+	printk(KERN_WARNING
+	       "nand_bbt: Error while writing read retry table %d\n", res);
 	return res;
 }
 
@@ -1027,9 +1440,72 @@ static int check_create(struct mtd_info *mtd, uint8_t *buf, struct nand_bbt_desc
 				return res;
 		}
 	}
+#if 0 //vincent test
+	int  numblocks, startblock;
+	printk("my print Bad block table \n");
+		numblocks = mtd->size >> (this->bbt_erase_shift - 1);
+		startblock = 0;
+	for (i = startblock; i < numblocks/4;) {
+		uint8_t dat;
+
+			dat = this->bbt[i ] ;
+			printk("Bad block table this->bbt[ %d] = %d\n",
+			       i , dat);
+			
+
+		i ++;
+	}
+#endif  //vincent test
 	return 0;
 }
 
+static int check_retry_table(struct mtd_info *mtd, uint8_t *buf, struct nand_bbt_descr *rd)
+{
+	int i, chips, chipsel, res = 0, need_save = 0;
+	struct nand_chip *this = mtd->priv;
+
+	/* Do we have a retry table per chip ? */
+	/* so far, use chip 0 retry param on chip 0 and chip 1 */
+	//chips = this->numchips;
+	chips = 1;
+	for (i = 0; i < chips; i++) {
+		/* Per chip */
+		chipsel = i;
+		if (rd->pages[i] == -1) {
+			goto create;
+		}
+		#ifdef RETRY_DEBUG
+		printk("read_abs_retry_table\n");
+		#endif
+		/* Read the retry table starting at a given page */
+		res = read_abs_retry_table(mtd, buf, rd, chipsel);
+		if (res == 0) {
+			if(this->cur_chip != NULL) {
+				this->select_chip(mtd, 0);
+				this->cur_chip->get_parameter(mtd, READ_RETRY_MODE);
+				this->select_chip(mtd, -1);
+			}
+			break;
+		}
+
+	create:
+		#ifdef RETRY_DEBUG
+		printk("create_hynix_table\n");
+		#endif
+		/* Create the table in memory by get feature or get otp cmd */
+		create_hynix_table(mtd, chipsel);
+
+		need_save = 1;
+
+		//printk("dannier write_hynix_table\n");
+		/* Write the retry block table to the device ? => leave it saved after bbt searched*/
+		/*res = write_hynix_table(mtd, buf, rd, chipsel);
+		if (res < 0)
+			return res;*/
+	}
+
+	return need_save;
+}
 /**
  * mark_bbt_regions - [GENERIC] mark the bad block table regions
  * @mtd:	MTD device structure
@@ -1069,9 +1545,13 @@ static void mark_bbt_region(struct mtd_info *mtd, struct nand_bbt_descr *td)
 			continue;
 		}
 		update = 0;
-		if (td->options & NAND_BBT_LASTBLOCK)
+		if (td->options & NAND_BBT_LASTBLOCK) {
 			block = ((i + 1) * nrblocks) - td->maxblocks;
-		else
+			if (td->pattern[0] == 'r' && td->pattern[1] == 'e') {
+				block = ((i + 1) * nrblocks) - td->maxblocks - 4;
+				//printk("mark_bbt_region set blocks =%d ~ %d\n", block, block+3);
+			}
+		} else
 			block = i * nrblocks;
 		block <<= 1;
 		for (j = 0; j < td->maxblocks; j++) {
@@ -1151,22 +1631,44 @@ static void verify_bbt_descr(struct mtd_info *mtd, struct nand_bbt_descr *bd)
  * The bad block table memory is allocated here. It must be freed
  * by calling the nand_free_bbt function.
  *
-*/
+*/extern struct nand_read_retry_param chip_table[];
 int nand_scan_bbt(struct mtd_info *mtd, struct nand_bbt_descr *bd)
 {
 	struct nand_chip *this = mtd->priv;
-	int len, res = 0;
+	int len, res = 0, i, need_save = 0;
 	uint8_t *buf;
 	struct nand_bbt_descr *td = this->bbt_td;
 	struct nand_bbt_descr *md = this->bbt_md;
 
 	len = mtd->size >> (this->bbt_erase_shift + 2);
 	/* Allocate memory (2bit per block) and clear the memory bad block table */
+//Vincent test start
+#if 0
+	struct erase_info einfo;
+	loff_t to;
+        memset(&einfo, 0, sizeof(einfo));
+	//to =( startblock + dir * 3)<< this->bbt_erase_shift;
+	to = 0 << this->bbt_erase_shift;//0;
+        einfo.mtd = mtd;
+        einfo.addr = to;
+	//einfo.len = 4 << this->bbt_erase_shift;
+	einfo.len = this->chipsize - (4 << this->phys_erase_shift);
+
+        printk("einfo.addr is %x\n",einfo.addr);
+        printk("einfo.len is %x\n",einfo.len);
+	res = nand_erase_nand(mtd, &einfo, 0xFF);
+	if (res < 0)
+   	     printk("enand_erase_nand result is %x\n",res);
+   	printk("my own enand_erase_nand done! \n");
+#endif
+//Vincent test end
 	this->bbt = kzalloc(len, GFP_KERNEL);
 	if (!this->bbt) {
 		printk(KERN_ERR "nand_scan_bbt: Out of memory\n");
 		return -ENOMEM;
 	}
+    /* Clear the memory bad block table */
+    memset (this->bbt, 0x00, len);
 
 	/* If no primary table decriptor is given, scan the device
 	 * to build a memory based bad block table
@@ -1192,6 +1694,30 @@ int nand_scan_bbt(struct mtd_info *mtd, struct nand_bbt_descr *bd)
 		this->bbt = NULL;
 		return -ENOMEM;
 	}
+	
+	if (mtd->dwRetry /*&& (mtd->id>>24) == NAND_MFR_HYNIX*/) {
+		for (i = 0; /*i < READ_RETRY_CHIP_NUM*/; i++) {
+			if (chip_table[i].nand_id == 0 && chip_table[i].nand_id_5th == 0)
+				break;
+			if (mtd->id == chip_table[i].nand_id && mtd->id2 == chip_table[i].nand_id_5th) {
+				#ifdef RETRY_DEBUG
+				printk("get retry table id 0x%x, 0x%x\n", chip_table[i].nand_id, chip_table[i].nand_id_5th);
+				#endif
+				this->cur_chip = &chip_table[i];
+				break;
+			}
+		}
+		if(this->cur_chip != NULL && chip_table[i].nand_id != 0) {
+			#ifdef RETRY_DEBUG
+			printk("search_hynix_retry_table\n");
+			#endif
+			search_hynix_retry_table(mtd, buf, this->retry_pattern);
+			#ifdef RETRY_DEBUG
+			printk("check_retry_table\n");
+			#endif
+			need_save = check_retry_table(mtd, buf, this->retry_pattern);
+		}
+	}
 
 	/* Is the bbt at a given page ? */
 	if (td->options & NAND_BBT_ABSPAGE) {
@@ -1203,6 +1729,19 @@ int nand_scan_bbt(struct mtd_info *mtd, struct nand_bbt_descr *bd)
 
 	if (res)
 		res = check_create(mtd, buf, bd);
+
+	
+	if (mtd->dwRetry && this->cur_chip != NULL && need_save) {
+		//printk("dannier write_hynix_table\n");
+		/* Write the retry block table to the device ? */
+		res = write_hynix_table(mtd, buf, this->retry_pattern, 0);
+
+		//testing
+		//this->cur_chip->cur_try_times = 5;
+	}
+
+	/* Prevent the rdtry block regions from erasing / writing */
+	mark_bbt_region(mtd, this->retry_pattern);
 
 	/* Prevent the bbt regions from erasing / writing */
 	mark_bbt_region(mtd, td);
@@ -1235,7 +1774,8 @@ int nand_update_bbt(struct mtd_info *mtd, loff_t offs)
 	/* Allocate a temporary buffer for one eraseblock incl. oob */
 	len = (1 << this->bbt_erase_shift);
 	len += (len >> this->page_shift) * mtd->oobsize;
-	buf = kmalloc(len, GFP_KERNEL);
+	//buf = kmalloc(len, GFP_KERNEL);
+	buf = vmalloc(len);
 	if (!buf) {
 		printk(KERN_ERR "nand_update_bbt: Out of memory\n");
 		return -ENOMEM;
@@ -1268,7 +1808,7 @@ int nand_update_bbt(struct mtd_info *mtd, loff_t offs)
 	}
 
  out:
-	kfree(buf);
+	vfree(buf);
 	return res;
 }
 
@@ -1359,6 +1899,8 @@ static int nand_create_default_bbt_descr(struct nand_chip *this)
 	bd->len = (this->options & NAND_BUSWIDTH_16) ? 2 : 1;
 	bd->pattern = scan_ff_pattern;
 	bd->options |= NAND_BBT_DYNAMICSTRUCT;
+	bd->page_offset[0] = this->page_offset[0];
+	bd->page_offset[1] = this->page_offset[1];
 	this->badblock_pattern = bd;
 	return 0;
 }
@@ -1432,13 +1974,26 @@ int nand_isbad_bbt(struct mtd_info *mtd, loff_t offs, int allowbbt)
 	block = (int)(offs >> (this->bbt_erase_shift - 1));
 	res = (this->bbt[block >> 3] >> (block & 0x06)) & 0x03;
 
-	DEBUG(MTD_DEBUG_LEVEL2, "nand_isbad_bbt(): bbt info for offs 0x%08x: (block %d) 0x%02x\n",
-	      (unsigned int)offs, block >> 1, res);
+	DEBUG(MTD_DEBUG_LEVEL2, "nand_isbad_bbt(): bbt info for offs 0x%08llx: (block %d) 0x%02x\n",
+	      offs, block >> 1, res);
 
 	switch ((int)res) {
 	case 0x00:
 		return 0;
 	case 0x01:
+		if (allowbbt != 0xFF) {
+				struct erase_info einfo;
+				int res1 = 0;
+				memset(&einfo, 0, sizeof(einfo));
+				einfo.mtd = mtd;
+				einfo.addr = offs;
+				einfo.len = (1 << this->bbt_erase_shift);
+				printk("einfo.addr is 0x%llx\n",einfo.addr);
+				printk("einfo.len is 0x%llx\n", einfo.len);
+				res1 = nand_erase_nand(mtd, &einfo, 0xFF);
+				if (res1 < 0)
+					printk("nand_erase_nand addr 0x%llx result is %d\n", einfo.addr, res1);
+			}
 		return 1;
 	case 0x02:
 		return allowbbt ? 0 : 1;

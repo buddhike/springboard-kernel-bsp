@@ -290,6 +290,18 @@ config SND_SOC_WM8741
 config SND_SOC_WM8750
 	tristate
 
+config SND_SOC_VT1602
+	tristate
+	depends on SND_SOC
+	
+config SND_SOC_VT1603
+	tristate
+	depends on SND_SOC
+
+config SND_SOC_HWDAC
+	tristate
+	depends on SND_SOC
+
 config SND_SOC_WM8753
 	tristate
 

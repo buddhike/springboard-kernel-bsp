@@ -21,7 +21,7 @@
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
  *
- * $Id: dhd_sdio.c 315747 2012-02-18 00:16:06Z $
+ * $Id: dhd_sdio.c 338148 2012-06-11 20:35:45Z $
  */
 
 #include <typedefs.h>
@@ -352,6 +352,39 @@ static bool forcealign;
 
 /* Flag to indicate if we should download firmware on driver load */
 uint dhd_download_fw_on_driverload = TRUE;
+
+#define FW_TYPE_STA     0
+#define FW_TYPE_APSTA   1
+#define FW_TYPE_P2P     2
+
+const static char *bcm4330b1_fw_name[] = {
+        "fw_bcm4330b1.bin",
+        "fw_bcm4330b1_apsta.bin",
+        "fw_bcm4330b1_p2p.bin"
+};
+
+const static char *bcm4330b2_fw_name[] = {
+        "fw_bcm4330b2.bin",
+        "fw_bcm4330b2_apsta.bin",
+        "fw_bcm4330b2_p2p.bin"
+};
+
+const static char *bcm43362a0_fw_name[] = {
+        "fw_bcm43362a0.bin",
+        "fw_bcm43362a0_apsta.bin",
+        "fw_bcm43362a0_p2p.bin"
+};
+
+const static char *bcm43362a2_fw_name[] = {
+        "fw_bcm43362a2.bin",
+        "fw_bcm43362a2_apsta.bin",
+        "fw_bcm43362a2_p2p.bin"
+};
+
+#define BCM4330B1_CHIP_REV      3
+#define BCM4330B2_CHIP_REV      4
+#define BCM43362A0_CHIP_REV     0
+#define BCM43362A2_CHIP_REV     1
 
 #define ALIGNMENT  4
 
@@ -768,8 +801,11 @@ dhdsdio_clkctl(dhd_bus_t *bus, uint target, bool pendok)
 	switch (target) {
 	case CLK_AVAIL:
 		/* Make sure SD clock is available */
-		if (bus->clkstate == CLK_NONE)
+		if (bus->clkstate == CLK_NONE) {
 			dhdsdio_sdclk(bus, TRUE);
+			/* wait for htclk stable */
+			udelay(50);
+		}
 		/* Now request HT Avail on the backplane */
 		ret = dhdsdio_htclk(bus, TRUE, pendok);
 		if (ret == BCME_OK) {
@@ -1454,7 +1490,7 @@ dhd_bus_rxctl(struct dhd_bus *bus, uchar *msg, uint msglen)
 {
 	int timeleft;
 	uint rxlen = 0;
-	bool pending;
+	bool pending = FALSE;
 
 	DHD_TRACE(("%s: Enter\n", __FUNCTION__));
 
@@ -1481,8 +1517,9 @@ dhd_bus_rxctl(struct dhd_bus *bus, uchar *msg, uint msglen)
 		dhd_os_sdunlock(bus->dhd);
 #endif /* DHD_DEBUG */
 	} else if (pending == TRUE) {
-		DHD_CTL(("%s: canceled\n", __FUNCTION__));
-		return -ERESTARTSYS;
+		/* possibly fw hangs so never responsed back */
+		DHD_ERROR(("%s: signal pending\n", __FUNCTION__));
+		return -EINTR;
 	} else {
 		DHD_CTL(("%s: resumed for unknown reason?\n", __FUNCTION__));
 #ifdef DHD_DEBUG
@@ -2788,7 +2825,6 @@ dhdsdio_download_state(dhd_bus_t *bus, bool enter)
 
 	if (!bus->sih)
 		return BCME_ERROR;
-
 	/* To enter download state, disable ARM and reset SOCRAM.
 	 * To exit download state, simply reset ARM (default is RAM boot).
 	 */
@@ -3062,11 +3098,6 @@ dhd_bus_stop(struct dhd_bus *bus, bool enforce_mutex)
 	bus->rxskip = FALSE;
 	bus->tx_seq = bus->rx_seq = 0;
 
-	/* Set to a safe default.  It gets updated when we
-	 * receive a packet from the fw but when we reset,
-	 * we need a safe default to be able to send the
-	 * initial mac address.
-	 */
 	bus->tx_max = 4;
 
 	if (enforce_mutex)
@@ -3123,9 +3154,9 @@ dhd_bus_init(dhd_pub_t *dhdp, bool enforce_mutex)
 	dhd_timeout_start(&tmo, DHD_WAIT_F2RDY * 1000);
 
 	ready = 0;
-	while (ready != enable && !dhd_timeout_expired(&tmo))
-	        ready = bcmsdh_cfg_read(bus->sdh, SDIO_FUNC_0, SDIOD_CCCR_IORDY, NULL);
-
+	do {
+		ready = bcmsdh_cfg_read(bus->sdh, SDIO_FUNC_0, SDIOD_CCCR_IORDY, NULL);
+	} while (ready != enable && !dhd_timeout_expired(&tmo));
 
 	DHD_INFO(("%s: enable 0x%02x, ready 0x%02x (waited %uus)\n",
 	          __FUNCTION__, enable, ready, tmo.elapsed));
@@ -3180,6 +3211,14 @@ dhd_bus_init(dhd_pub_t *dhdp, bool enforce_mutex)
 	/* If we didn't come up, turn off backplane clock */
 	if (dhdp->busstate != DHD_BUS_DATA)
 		dhdsdio_clkctl(bus, CLK_NONE, FALSE);
+
+#ifdef DHD_DEBUG
+    /*
+	if ( dhd_serialconsole(bus, TRUE, TRUE, &err) < 0 ) {
+		DHD_ERROR(("%s: call dhd_serialconsole error(%d)\n", __FUNCTION__, err));
+	}
+    */
+#endif
 
 exit:
 	if (enforce_mutex)
@@ -3728,6 +3767,7 @@ dhdsdio_rxglom(dhd_bus_t *bus, uint8 rxseq)
 	}
 	return num;
 }
+
 
 /* Return TRUE if there may be more frames to read */
 static uint
@@ -4595,8 +4635,32 @@ clkwait:
 		bcmsdh_intr_enable(sdh);
 	}
 
+#if defined(OOB_INTR_ONLY) && !defined(HW_OOB)
+	/* In case of SW-OOB(using edge trigger),
+	 * Check interrupt status in the dongle again after enable irq on the host.
+	 * and rechedule dpc if interrupt is pended in the dongle.
+	 * There is a chance to miss OOB interrupt while irq is disabled on the host.
+	 * No need to do this with HW-OOB(level trigger)
+	 */
+	R_SDREG(newstatus, &regs->intstatus, retries);
+	if (bcmsdh_regfail(bus->sdh))
+		newstatus = 0;
+	if (newstatus & bus->hostintmask) {
+		bus->ipend = TRUE;
+		resched = TRUE;
+	}
+#endif /* defined(OOB_INTR_ONLY) && !defined(HW_OOB) */
+
 	if (TXCTLOK(bus) && bus->ctrl_frame_stat && (bus->clkstate == CLK_AVAIL))  {
 		int ret, i;
+		uint8* frame_seq = bus->ctrl_frame_buf + SDPCM_FRAMETAG_LEN;
+
+		if (*frame_seq != bus->tx_seq) {
+			DHD_INFO(("%s IOCTL frame seq lag detected!"
+				" frm_seq:%d != bus->tx_seq:%d, corrected\n",
+				__FUNCTION__, *frame_seq, bus->tx_seq));
+			*frame_seq = bus->tx_seq;
+		}
 
 		ret = dhd_bcmsdh_send_buf(bus, bcmsdh_cur_sbwad(sdh), SDIO_FUNC_2, F2SYNC,
 		                      (uint8 *)bus->ctrl_frame_buf, (uint32)bus->ctrl_frame_len,
@@ -5396,6 +5460,10 @@ dhdsdio_probe(uint16 venid, uint16 devid, uint16 bus_no, uint16 slot,
 		goto fail;
 	}
 
+#ifdef DHD_DEBUG
+	//dhd_serialconsole(bus, TRUE, TRUE, &ret);
+#endif
+
 #ifdef PROP_TXSTATUS
 	if (dhd_download_fw_on_driverload)
 		dhd_wl_ioctl_cmd(bus->dhd, WLC_UP, (char *)&up, sizeof(up), TRUE, 0);
@@ -5679,6 +5747,37 @@ dhdsdio_probe_init(dhd_bus_t *bus, osl_t *osh, void *sdh)
 	bus->use_rxchain = (bool)bus->sd_rxchain;
 
 	return TRUE;
+}
+
+void
+dhd_bus_select_firmware_name_by_chip(struct dhd_bus *bus, char *dst, char *src)
+{
+        int fw_type=(strstr(src, "_apsta")?FW_TYPE_APSTA:(strstr(src, "_p2p")?FW_TYPE_P2P:FW_TYPE_STA));
+	int i; 
+     
+	strcpy(dst, src);
+
+	/* find out the last '/' */
+	i = strlen(dst);
+	while (i>0){
+		if (dst[i] == '/') break;
+		i--;
+	}
+
+        switch (bus->sih->chip) {
+        case BCM4330_CHIP_ID:
+                if (bus->sih->chiprev==BCM4330B1_CHIP_REV)
+                        strcpy(&dst[i+1], bcm4330b1_fw_name[fw_type]);
+                else
+                        strcpy(&dst[i+1], bcm4330b2_fw_name[fw_type]);
+                break;
+        case BCM43362_CHIP_ID:
+                if (bus->sih->chiprev==BCM43362A0_CHIP_REV)
+                        strcpy(&dst[i+1], bcm43362a0_fw_name[fw_type]);
+                else
+                        strcpy(&dst[i+1], bcm43362a2_fw_name[fw_type]);
+                break;
+        }
 }
 
 bool
@@ -6165,6 +6264,7 @@ dhd_bcmsdh_send_buf(dhd_bus_t *bus, uint32 addr, uint fn, uint flags, uint8 *buf
 uint
 dhd_bus_chip(struct dhd_bus *bus)
 {
+	ASSERT(bus);
 	ASSERT(bus->sih != NULL);
 	return bus->sih->chip;
 }
@@ -6172,6 +6272,7 @@ dhd_bus_chip(struct dhd_bus *bus)
 void *
 dhd_bus_pub(struct dhd_bus *bus)
 {
+	ASSERT(bus);
 	return bus->dhd;
 }
 
@@ -6218,7 +6319,6 @@ dhd_bus_devreset(dhd_pub_t *dhdp, uint8 flag)
 			bus->dhd->dongle_reset = TRUE;
 			bus->dhd->up = FALSE;
 			dhd_os_sdunlock(dhdp);
-
 			DHD_TRACE(("%s:  WLAN OFF DONE\n", __FUNCTION__));
 			/* App can now remove power from device */
 		} else
@@ -6288,6 +6388,15 @@ dhd_bus_devreset(dhd_pub_t *dhdp, uint8 flag)
 	}
 	return bcmerror;
 }
+
+/* Get Chip ID version */
+uint dhd_bus_chip_id(dhd_pub_t *dhdp)
+{
+	dhd_bus_t *bus = dhdp->bus;
+
+       return  bus->sih->chip;
+}
+
 
 int
 dhd_bus_membytes(dhd_pub_t *dhdp, bool set, uint32 address, uint8 *data, uint size)

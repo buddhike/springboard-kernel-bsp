@@ -29,7 +29,7 @@ int root_mountflags = MS_RDONLY | MS_SILENT;
 static char * __initdata root_device_name;
 static char __initdata saved_root_name[64];
 static int __initdata root_wait;
-
+extern unsigned long wmt_read_oscr(void);//add by jay
 dev_t ROOT_DEV;
 
 static int __init load_ramdisk(char *str)
@@ -215,9 +215,48 @@ done:
 	return res;
 }
 
+/*add by jay*/
+int root_from_usb = 0;
+// BassHuang
+int root_from_sd0 = 0;
+int root_from_sd1 = 0;
+int root_from_sd2 = 0;
+int root_from_sd3 = 0;
+int root_scan_done = 0;
+wait_queue_head_t root_wait_queue;
+
+
 static int __init root_dev_setup(char *line)
 {
 	strlcpy(saved_root_name, line, sizeof(saved_root_name));
+
+	
+    //add by jay
+	if(!strncmp(line,"/dev/sda",8))
+	{
+	     root_from_usb = 1;
+		 init_waitqueue_head(&root_wait_queue);
+	}
+    else if(!strncmp(line,"/dev/mmcblk0",12))
+	{
+		root_from_sd0=1;
+		init_waitqueue_head(&root_wait_queue);
+	}
+	else if(!strncmp(line,"/dev/mmcblk1",12))
+	{
+		root_from_sd1=1;
+		init_waitqueue_head(&root_wait_queue);
+	}    
+	else if(!strncmp(line,"/dev/mmcblk2",12))
+	{
+		root_from_sd2=1;
+		init_waitqueue_head(&root_wait_queue);
+	}    
+	else if(!strncmp(line,"/dev/mmcblk3",12))
+	{
+		root_from_sd3=1;
+		init_waitqueue_head(&root_wait_queue);
+	}
 	return 1;
 }
 
@@ -436,7 +475,10 @@ void __init mount_root(void)
  */
 void __init prepare_namespace(void)
 {
-	int is_floppy;
+	int is_floppy;	
+	//jay
+	unsigned long p;
+	int timeout = 15*HZ;
 
 	if (root_delay) {
 		printk(KERN_INFO "Waiting %dsec before mounting root device...\n",
@@ -453,6 +495,22 @@ void __init prepare_namespace(void)
 	 */
 	wait_for_device_probe();
 
+    //add by jay
+    p = wmt_read_oscr();
+    if(root_from_usb || root_from_sd0 || root_from_sd1 || root_from_sd2 || root_from_sd3)
+    {     
+	    printk("root from %s ,waiting for scan\n", (root_from_usb) ? "usb" : "sd");             
+		timeout=wait_event_timeout(root_wait_queue, root_scan_done==1,timeout);
+		if(timeout==0)
+        {
+             printk("mount rootfs timeout, it may fail\n");
+         }
+		else
+		{
+			printk("wait for root device %lu ms\n",(wmt_read_oscr()-p)/3000);	
+		}		
+    }
+	
 	md_run_setup();
 
 	if (saved_root_name[0]) {

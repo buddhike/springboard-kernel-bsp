@@ -288,7 +288,12 @@ __acquires(ehci->lock)
 		status,
 		urb->actual_length, urb->transfer_buffer_length);
 #endif
-
+	/*{CharlesTu, 2008.12.26, for test mode */
+#ifdef CONFIG_USB_EHCI_EHSET
+	if (likely(urb->transfer_flags == URB_HCD_DRIVER_TEST))
+	return;
+#endif
+	/*CharlesTu}*/
 	/* complete() can reenter this HCD */
 	usb_hcd_unlink_urb_from_ep(ehci_to_hcd(ehci), urb);
 	spin_unlock (&ehci->lock);
@@ -868,6 +873,11 @@ qh_make (
 				qh->period = ehci->periodic_size;
 				urb->interval = qh->period;
 			}
+			/*CharlesTu,2009.04.29,patch Genesys hub with LS keyboard 
+			* and FS mouse , test mouse will occur device reset issue.
+			*/
+			if (qh->period < 8)  
+				qh->period = 8;
 		}
 	}
 

@@ -3,13 +3,13 @@ DHDCFLAGS = -Wall -Wstrict-prototypes -Dlinux -DBCMDRIVER                     \
 	-DBCMDONGLEHOST -DUNRELEASEDCHIP -DBCMDMA32 -DWLBTAMP -DBCMFILEIMAGE  \
 	-DDHDTHREAD -DDHD_GPL -DDHD_SCHED -DDHD_DEBUG -DSDTEST -DBDC -DTOE    \
 	-DDHD_BCMEVENTS -DSHOW_EVENTS -DDONGLEOVERLAYS -DBCMDBG               \
-	-DCUSTOMER_HW2 -DCUSTOM_OOB_GPIO_NUM=2 -DOOB_INTR_ONLY -DHW_OOB       \
+	-DCUSTOMER_HW -DOOB_INTR_ONLY \
 	-DMMC_SDIO_ABORT -DBCMSDIO -DBCMLXSDMMC -DBCMPLATFORM_BUS -DWLP2P     \
 	-DNEW_COMPAT_WIRELESS -DWIFI_ACT_FRAME -DARP_OFFLOAD_SUPPORT          \
-	-DKEEP_ALIVE -DCSCAN -DGET_CUSTOM_MAC_ENABLE -DPKT_FILTER_SUPPORT     \
+	-DKEEP_ALIVE -DCSCAN -DPKT_FILTER_SUPPORT     \
 	-DEMBEDDED_PLATFORM -DENABLE_INSMOD_NO_FW_LOAD -DPNO_SUPPORT          \
-	-DSET_RANDOM_MAC_SOFTAP -DWL_ENABLE_P2P_IF -DDHD_USE_EARLYSUSPEND     \
-	-Idrivers/net/wireless/bcmdhd -Idrivers/net/wireless/bcmdhd/include
+	-DOEM_ANDROID -DLINUX -DWL_ENABLE_P2P_IF -DWL_WIRELESS_EXT	  \
+	-Idrivers/net/wireless/bcmdhd -Idrivers/net/wireless/bcmdhd/include   \
 
 DHDOFILES = aiutils.o bcmsdh_sdmmc_linux.o dhd_linux.o siutils.o bcmutils.o   \
 	dhd_linux_sched.o bcmwifi.o dhd_sdio.o bcmevent.o dhd_bta.o hndpmu.o  \
@@ -20,15 +20,11 @@ obj-$(CONFIG_BCMDHD) += bcmdhd.o
 bcmdhd-objs += $(DHDOFILES)
 ifneq ($(CONFIG_WIRELESS_EXT),)
 bcmdhd-objs += wl_iw.o
-DHDCFLAGS += -DSOFTAP -DWL_WIRELESS_EXT
+DHDCFLAGS += -DSOFTAP
 endif
 ifneq ($(CONFIG_CFG80211),)
 bcmdhd-objs += wl_cfg80211.o wl_cfgp2p.o wl_linux_mon.o
 DHDCFLAGS += -DWL_CFG80211
-endif
-ifneq ($(CONFIG_DHD_USE_SCHED_SCAN),)
-DHDCFLAGS += -DWL_SCHED_SCAN
-else
 endif
 EXTRA_CFLAGS = $(DHDCFLAGS)
 ifeq ($(CONFIG_BCMDHD),m)

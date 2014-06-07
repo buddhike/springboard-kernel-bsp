@@ -268,6 +268,14 @@ static void suspend_backoff(void)
 			  msecs_to_jiffies(SUSPEND_BACKOFF_INTERVAL));
 }
 
+//gri
+
+extern int wmt_getsyspara(char *varname, char *varval, int *varlen);
+
+static unsigned int var_wakelock_dbg_en=0;
+static unsigned int var_wakelock_dbg_time=500;
+static unsigned int var_wakelock_dbg_plus=0;
+
 static void suspend(struct work_struct *work)
 {
 	int ret;
@@ -311,8 +319,17 @@ static void suspend(struct work_struct *work)
 	if (current_event_num == entry_event_num) {
 		if (debug_mask & DEBUG_SUSPEND)
 			pr_info("suspend: pm_suspend returned with no event\n");
-		wake_lock_timeout(&unknown_wakeup, HZ / 2);
+		if (!var_wakelock_dbg_en)	
+			wake_lock_timeout(&unknown_wakeup, HZ / 2);
 	}
+				
+	if (var_wakelock_dbg_en) {
+		if (var_wakelock_dbg_plus)
+			wake_lock_timeout(&unknown_wakeup, HZ * var_wakelock_dbg_time);
+		else
+			wake_lock_timeout(&unknown_wakeup, HZ / var_wakelock_dbg_time);	
+	}
+	
 }
 static DECLARE_WORK(suspend_work, suspend);
 
@@ -563,6 +580,32 @@ static int __init wakelocks_init(void)
 {
 	int ret;
 	int i;
+	
+	//gri
+	char wakelock_buf[80];
+	char wakelock_varname[] = "wmt.pmc.dbg";
+	int wakelock_varlen = 80;	
+	unsigned int f_wakelock_dbg_time;
+
+
+	if (wmt_getsyspara(wakelock_varname, wakelock_buf, &wakelock_varlen) == 0) {
+		sscanf(wakelock_buf,"%d:%d",
+						&var_wakelock_dbg_en,
+						&var_wakelock_dbg_time);		
+	}
+	else {
+		var_wakelock_dbg_en = 0;
+		var_wakelock_dbg_time = 500;
+	}	
+	if (var_wakelock_dbg_time >= 1000){
+		var_wakelock_dbg_plus = 1;
+		f_wakelock_dbg_time = var_wakelock_dbg_time / 1000;
+	}
+	else {
+		var_wakelock_dbg_plus = 0;
+		f_wakelock_dbg_time = 1000 / var_wakelock_dbg_time;
+	}
+	var_wakelock_dbg_time = (int)f_wakelock_dbg_time;		
 
 	for (i = 0; i < ARRAY_SIZE(active_wake_locks); i++)
 		INIT_LIST_HEAD(&active_wake_locks[i]);

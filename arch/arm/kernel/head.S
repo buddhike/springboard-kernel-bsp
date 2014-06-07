@@ -348,11 +348,11 @@ __secondary_data:
  *  r13 = *virtual* address to jump to upon completion
  */
 __enable_mmu:
-#ifdef CONFIG_ALIGNMENT_TRAP
-	orr	r0, r0, #CR_A
-#else
+//#ifdef CONFIG_ALIGNMENT_TRAP
+//	orr	r0, r0, #CR_A
+//#else
 	bic	r0, r0, #CR_A
-#endif
+//#endif
 #ifdef CONFIG_CPU_DCACHE_DISABLE
 	bic	r0, r0, #CR_C
 #endif

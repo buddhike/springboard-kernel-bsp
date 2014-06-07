@@ -166,6 +166,29 @@ static ssize_t state_show(struct kobject *kobj, struct kobj_attribute *attr,
 	return (s - buf);
 }
 
+static int run_pre_suspend(void)
+{
+	int ret;
+	char *argv[] = { "/system/etc/wmt/pm.sh", "", NULL };
+	char *envp[] =
+		{ "HOME=/", "PATH=/sbin:/bin:/usr/sbin:/usr/bin", "ACTION=pre_suspend", NULL };
+
+	ret = call_usermodehelper(argv[0], argv, envp, 1);
+	return ret;
+}
+
+static int run_post_resume(void)
+{
+	int ret;
+	char *argv[] = { "/system/etc/wmt/pm.sh", "", NULL };
+	char *envp[] =
+		{ "HOME=/", "PATH=/sbin:/bin:/usr/sbin:/usr/bin", "ACTION=post_resume", NULL };
+
+	ret = call_usermodehelper(argv[0], argv, envp, 1);
+	return ret;
+}
+
+
 static ssize_t state_store(struct kobject *kobj, struct kobj_attribute *attr,
 			   const char *buf, size_t n)
 {
@@ -195,7 +218,12 @@ static ssize_t state_store(struct kobject *kobj, struct kobj_attribute *attr,
 		if (*s && len == strlen(*s) && !strncmp(buf, *s, len))
 			break;
 	}
-	if (state < PM_SUSPEND_MAX && *s)
+	if (state < PM_SUSPEND_MAX && *s) {
+		if (state == PM_SUSPEND_MEM){
+			run_pre_suspend();
+		} else if(state == PM_SUSPEND_ON) {
+			run_post_resume();
+		}
 #ifdef CONFIG_EARLYSUSPEND
 		if (state == PM_SUSPEND_ON || valid_state(state)) {
 			error = 0;
@@ -204,6 +232,7 @@ static ssize_t state_store(struct kobject *kobj, struct kobj_attribute *attr,
 #else
 		error = enter_state(state);
 #endif
+	}
 #endif
 
  Exit:

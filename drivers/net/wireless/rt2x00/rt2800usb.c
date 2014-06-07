@@ -1006,6 +1006,7 @@ static struct usb_device_id rt2800usb_device_table[] = {
 	/* Azurewave */
 	{ USB_DEVICE(0x13d3, 0x3329) },
 	{ USB_DEVICE(0x13d3, 0x3365) },
+	{ USB_DEVICE(0x13d3, 0x3400) },
 	/* Ralink */
 	{ USB_DEVICE(0x148f, 0x5370) },
 	{ USB_DEVICE(0x148f, 0x5372) },
@@ -1132,6 +1133,7 @@ static struct usb_driver rt2800usb_driver = {
 	.disconnect	= rt2x00usb_disconnect,
 	.suspend	= rt2x00usb_suspend,
 	.resume		= rt2x00usb_resume,
+	.reset_resume = rt2x00usb_resume,
 };
 
 static int __init rt2800usb_init(void)

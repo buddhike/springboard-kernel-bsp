@@ -548,6 +548,7 @@ void __init pci_common_init(struct hw_pci *hw)
 	list_for_each_entry(sys, &hw->buses, node) {
 		struct pci_bus *bus = sys->bus;
 
+#if 0
 		if (!use_firmware) {
 			/*
 			 * Size the bridge windows.
@@ -564,7 +565,7 @@ void __init pci_common_init(struct hw_pci *hw)
 			 */
 			pci_enable_bridges(bus);
 		}
-
+#endif
 		/*
 		 * Tell drivers about devices found.
 		 */

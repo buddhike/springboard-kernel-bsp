@@ -145,7 +145,7 @@ if RT2800USB
 
 config RT2800USB_RT33XX
 	bool "rt2800usb - Include support for rt33xx devices"
-	default y
+	default n
 	---help---
 	  This adds support for rt33xx wireless chipset family to the
 	  rt2800usb driver.
@@ -164,8 +164,8 @@ config RT2800USB_RT35XX
 	  intended for testers and developers.
 
 config RT2800USB_RT53XX
-       bool "rt2800usb - Include support for rt53xx devices (EXPERIMENTAL)"
-       depends on EXPERIMENTAL
+       bool "rt2800usb - Include support for rt53xx devices"
+       default n
        ---help---
          This adds support for rt53xx wireless chipset family to the
          rt2800pci driver.

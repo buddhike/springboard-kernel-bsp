@@ -114,6 +114,20 @@ source "drivers/usb/mon/Kconfig"
 
 source "drivers/usb/wusbcore/Kconfig"
 
+# enable USB HUB hardware reset function (GPIO25) for VAB-600-A daughter board
+config VAB600A_USB_HUB_GPIO25_RESET
+	bool "[VAB-600-A] Enable USB HUB hardware reset function (GPIO25)"
+	depends on USB
+	help
+	  Say Y here if you connected VAB-600-A daughter board to VAB-600 mainboard
+	  and found some USB devices couldn't be detected successfully.
+
+	  This function will use GPIO25 to reset VAB-600-A USB HUB chip
+	  when the system power-on, and resume from suspend.
+
+	  If you enable this function, then rebuild the kernel,
+	  and check if the USB devices could be detected successfully.
+
 source "drivers/usb/host/Kconfig"
 
 source "drivers/usb/musb/Kconfig"

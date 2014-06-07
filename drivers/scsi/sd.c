@@ -122,6 +122,11 @@ static DEFINE_MUTEX(sd_ref_mutex);
 static struct kmem_cache *sd_cdb_cache;
 static mempool_t *sd_cdb_pool;
 
+//Jay
+extern int root_from_usb;
+extern int root_scan_done;
+extern wait_queue_head_t root_wait_queue;
+
 static const char *sd_cache_types[] = {
 	"write through", "none", "write back",
 	"write back, no read (daft)"
@@ -2536,6 +2541,20 @@ static void sd_probe_async(void *data, async_cookie_t cookie)
 		  sdp->removable ? "removable " : "");
 	scsi_autopm_put_device(sdp);
 	put_device(&sdkp->dev);
+
+	//add by jay			
+		if(root_from_usb)
+		{
+			if(!strncmp(sdkp->disk->disk_name,"sda",3)){ 
+				 if(!root_scan_done)
+				 {
+							printk("root usb scan done, wake kernel_init to mount rootfs\n");
+							root_scan_done = 1;
+						   wake_up(&root_wait_queue);
+					}
+			}
+	
+		 }
 }
 
 /**

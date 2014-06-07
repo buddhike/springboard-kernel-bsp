@@ -56,8 +56,8 @@ extern int nand_unlock(struct mtd_info *mtd, loff_t ofs, uint64_t len);
  * is supported now. If you add a chip with bigger oobsize/page
  * adjust this accordingly.
  */
-#define NAND_MAX_OOBSIZE	576
-#define NAND_MAX_PAGESIZE	8192
+#define NAND_MAX_OOBSIZE	1280
+#define NAND_MAX_PAGESIZE	16384
 
 /*
  * Constants for hardware specific CLE/ALE/NCE function
@@ -93,6 +93,8 @@ extern int nand_unlock(struct mtd_info *mtd, loff_t ofs, uint64_t len);
 #define NAND_CMD_ERASE2		0xd0
 #define NAND_CMD_PARAM		0xec
 #define NAND_CMD_RESET		0xff
+#define NAND_CMD_RESET_NO_STATUS_READ 0xFF1
+#define NAND_CMD_HYNIX_RETRY_END 0x38
 
 #define NAND_CMD_LOCK		0x2a
 #define NAND_CMD_UNLOCK1	0x23
@@ -384,6 +386,10 @@ struct nand_ecc_ctrl {
 			int sndcmd);
 	int (*write_oob)(struct mtd_info *mtd, struct nand_chip *chip,
 			int page);
+        int			(*read_bb_oob)(struct mtd_info *mtd,
+					    struct nand_chip *chip,
+					    int page,
+					    int sndcmd);
 };
 
 /**
@@ -506,6 +512,7 @@ struct nand_chip {
 			int status, int page);
 	int (*write_page)(struct mtd_info *mtd, struct nand_chip *chip,
 			const uint8_t *buf, int page, int cached, int raw);
+	int (*get_para)(struct mtd_info *mtd, struct nand_chip *chip);
 
 	int chip_delay;
 	unsigned int options;
@@ -543,6 +550,9 @@ struct nand_chip {
 	struct nand_bbt_descr *bbt_md;
 
 	struct nand_bbt_descr *badblock_pattern;
+	struct nand_bbt_descr *retry_pattern;
+	int page_offset[2];
+	struct nand_read_retry_param *cur_chip;
 
 	void *priv;
 };
@@ -558,7 +568,11 @@ struct nand_chip {
 #define NAND_MFR_STMICRO	0x20
 #define NAND_MFR_HYNIX		0xad
 #define NAND_MFR_MICRON		0x2c
-#define NAND_MFR_AMD		0x01
+#define NAND_MFR_SANDISK	0x45
+#define NAND_MFR_AMD	  	0x01
+#define NAND_MFR_INTEL		0x89
+#define NAND_MFR_MXIC 		0xc2
+#define NAND_MFR_MIRA 		0x92
 
 /**
  * struct nand_flash_dev - NAND Flash Device ID Structure
@@ -581,6 +595,73 @@ struct nand_flash_dev {
 	unsigned long options;
 };
 
+#define BOOT_MAGIC_SIZE 0x8
+struct nand_rdtry_param_hdr {
+	unsigned char magic[BOOT_MAGIC_SIZE];
+	unsigned int nand_id;  //nand id
+	unsigned int nand_id_5th;  //nand 5th id
+	unsigned int eslc_reg_cnt; // Enhanced SLC register count.
+	unsigned int total_retry_cnt; // total retry count
+	unsigned int retry_reg_cnt; // retry register count
+	//unsigned char eslc[eslc_reg]; //eslc default data.
+	//unsigned char retry_data[total_retry_cnt * retry_reg_cnt];  /* param data */
+};
+//All
+struct nand_read_retry_param {
+	char magic[32];
+	unsigned int  nand_id;
+	unsigned int  nand_id_5th;
+	unsigned int  eslc_reg_num;
+	unsigned char eslc_offset[32];
+	unsigned char eslc_def_value[32];
+	unsigned char eslc_set_value[32];
+	unsigned int  retry_reg_num;
+	unsigned char  retry_offset[32];
+	unsigned char retry_def_value[32];
+	unsigned char retry_value[256];
+	unsigned int otp_len;
+	unsigned char otp_offset[32];
+	unsigned char otp_data[32];
+	unsigned int total_try_times;
+	int cur_try_times;
+	int (*set_parameter)(struct mtd_info *mtd, int mode, int def_mode);
+	int (*get_parameter)(struct mtd_info *mtd, int mode);
+	int (*get_otp_table)(struct mtd_info *mtd, struct nand_chip *chip);
+	int retry; //1: in retry mode 
+};
+/* #define RETRY_DEBUG */
+
+
+/* DannierChen-2009-10-07 add for new nand flash support list */
+#ifndef DWORD
+#define DWORD	unsigned int
+#endif
+#define MAX_PRODUCT_NAME_LENGTH 0x20
+struct WMT_nand_flash_dev {
+ DWORD dwFlashID;            //composed by 4 bytes of ID. For example:0xADF1801D
+ DWORD dwBlockCount;      //block count of one chip. For example: 1024
+ DWORD dwPageSize;       //page size. For example:2048(other value can be 512 or 4096)
+ DWORD dwSpareSize;       //spare area size. For example:16(almost all kinds of nand is 16)
+ DWORD dwBlockSize;       //block size = dwPageSize * PageCntPerBlock. For example:131072
+ DWORD dwAddressCycle;      //address cycle 4 or 5
+ DWORD dwBI0Position;      //BI0 page postion in block
+ DWORD dwBI1Position;      //BI1 page postion in block
+ DWORD dwBIOffset;       //BI offset in page
+ DWORD dwDataWidth;      //data with X8 or X16
+ DWORD dwPageProgramLimit;     //chip can program PAGE_PROGRAM_LIMIT times within the same page
+ DWORD dwSeqRowReadSupport;    //whether support sequential row read, 1 = support 0 = not support
+ DWORD dwSeqPageProgram;     //chip need sequential page program in a block. 1 = need
+ DWORD dwNandType;       //MLC or SLC
+ DWORD dwECCBitNum;      //ECC bit number needed
+ DWORD dwRWTimming;     //NFC Read Pulse width and Read hold time, write so does. default =0x12101210
+ DWORD dwTadl;      		//NFC write TADL timeing config
+ DWORD dwDDR;      		  //NFC support toshia ddr(toggle) mode = 1 not support = 0
+ DWORD dwRetry;    		  //NFC Read Retry support = 1 not support = 0
+ DWORD dwRdmz;					//NFC Randomizer support = 1 not support = 0
+ char ProductName[MAX_PRODUCT_NAME_LENGTH]; //product name. for example "HYNIX_NF_HY27UF081G2A"
+ unsigned long options;
+ DWORD dwFlashID2;      //composed by additional 2 bytes of ID from original 4 bytes.
+};
 /**
  * struct nand_manufacturers - NAND Flash Manufacturer ID Structure
  * @name:	Manufacturer name
@@ -591,6 +672,7 @@ struct nand_manufacturers {
 	char *name;
 };
 
+extern struct WMT_nand_flash_dev WMT_nand_flash_ids[];
 extern struct nand_flash_dev nand_flash_ids[];
 extern struct nand_manufacturers nand_manuf_ids[];
 
@@ -602,7 +684,30 @@ extern int nand_erase_nand(struct mtd_info *mtd, struct erase_info *instr,
 			   int allowbbt);
 extern int nand_do_read(struct mtd_info *mtd, loff_t from, size_t len,
 			size_t *retlen, uint8_t *buf);
+extern struct nand_read_retry_param chip_table[];
+extern int hynix_get_parameter(struct mtd_info *mtd, int mode);
+extern int hynix_set_parameter(struct mtd_info *mtd, int mode, int def_mode);
+extern int hynix_get_otp(struct mtd_info *mtd, struct nand_chip *chip);
+extern int toshiba_get_parameter(struct mtd_info *mtd, int mode);
+extern int toshiba_set_parameter(struct mtd_info *mtd, int mode, int def_mode);
+extern int samsung_get_parameter(struct mtd_info *mtd, int mode);
+extern int samsung_set_parameter(struct mtd_info *mtd, int mode, int def_mode);
+extern int sandisk_get_parameter(struct mtd_info *mtd, int mode);
+extern int sandisk_set_parameter(struct mtd_info *mtd, int mode, int def_mode);
+extern int micron_get_parameter(struct mtd_info *mtd, int mode);
+extern int micron_set_parameter(struct mtd_info *mtd, int mode, int def_mode);
 
+
+
+#ifndef ARRAY_SIZE
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
+#endif
+#define READ_RETRY_CHIP_NUM ARRAY_SIZE(chip_table)
+#define ESLC_MODE 0
+#define READ_RETRY_MODE 1
+#define TEST_MODE 2
+#define DEFAULT_VALUE 0
+#define ECC_ERROR_VALUE 1
 /**
  * struct platform_nand_chip - chip level device structure
  * @nr_chips:		max. number of chips to scan for

@@ -642,6 +642,14 @@ config USB_SERIAL_ZIO
 	  To compile this driver as a module, choose M here: the
 	  module will be called zio.
 
+config USB_SERIAL_VIZZINI
+	tristate "USB Vizzini USB Serial Driver"
+	help
+	  Say Y here if you want to use Vizzini USB Serial Driver.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called Vizzini.
+
 config USB_SERIAL_SSU100
 	tristate "USB Quatech SSU-100 Single Port Serial Driver"
 	help

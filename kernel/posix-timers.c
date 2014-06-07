@@ -129,7 +129,9 @@ static DEFINE_SPINLOCK(idr_lock);
  *	    which we beg off on and pass to do_sys_settimeofday().
  */
 
-static struct k_clock posix_clocks[MAX_CLOCKS];
+//static struct k_clock posix_clocks[MAX_CLOCKS];
+struct k_clock posix_clocks[MAX_CLOCKS];//add by jay
+EXPORT_SYMBOL(posix_clocks);//add by jay
 
 /*
  * These ones are defined below.
@@ -187,7 +189,7 @@ static int posix_ktime_get_ts(clockid_t which_clock, struct timespec *tp)
 }
 
 /*
- * Get monotonic-raw time for posix timers
+ * Get monotonic-raw time for posix timers 
  */
 static int posix_get_monotonic_raw(clockid_t which_clock, struct timespec *tp)
 {

@@ -109,6 +109,21 @@ static DEFINE_MUTEX(open_lock);
 module_param(perdev_minors, int, 0444);
 MODULE_PARM_DESC(perdev_minors, "Minors numbers to allocate per device");
 
+
+#if 0
+#define DBG(x...)	printk(KERN_ALERT x)
+#else
+#define DBG(x...)	do { } while (0)
+#endif
+
+// BassHuang
+extern int root_from_sd0;
+extern int root_from_sd1;
+extern int root_from_sd2;
+extern int root_from_sd3;
+extern int root_scan_done;
+extern wait_queue_head_t root_wait_queue;
+
 static struct mmc_blk_data *mmc_blk_get(struct gendisk *disk)
 {
 	struct mmc_blk_data *md;
@@ -469,7 +484,8 @@ static u32 mmc_sd_num_wr_blocks(struct mmc_card *card)
 
 	cmd.opcode = MMC_APP_CMD;
 	cmd.arg = card->rca << 16;
-	cmd.flags = MMC_RSP_SPI_R1 | MMC_RSP_R1 | MMC_CMD_AC;
+	//cmd.flags = MMC_RSP_SPI_R1 | MMC_RSP_R1 | MMC_CMD_AC;
+	cmd.flags = MMC_RSP_R1 | MMC_CMD_AC;
 
 	err = mmc_wait_for_cmd(card->host, &cmd, 0);
 	if (err)
@@ -481,7 +497,8 @@ static u32 mmc_sd_num_wr_blocks(struct mmc_card *card)
 
 	cmd.opcode = SD_APP_SEND_NUM_WR_BLKS;
 	cmd.arg = 0;
-	cmd.flags = MMC_RSP_SPI_R1 | MMC_RSP_R1 | MMC_CMD_ADTC;
+	//cmd.flags = MMC_RSP_SPI_R1 | MMC_RSP_R1 | MMC_CMD_ADTC;
+	cmd.flags = MMC_RSP_R1 | MMC_CMD_ADTC;
 
 	data.timeout_ns = card->csd.tacc_ns * 100;
 	data.timeout_clks = card->csd.tacc_clks * 100;
@@ -527,7 +544,8 @@ static int send_stop(struct mmc_card *card, u32 *status)
 	int err;
 
 	cmd.opcode = MMC_STOP_TRANSMISSION;
-	cmd.flags = MMC_RSP_SPI_R1B | MMC_RSP_R1B | MMC_CMD_AC;
+	//cmd.flags = MMC_RSP_SPI_R1B | MMC_RSP_R1B | MMC_CMD_AC;
+	cmd.flags = MMC_RSP_R1B | MMC_CMD_AC;
 	err = mmc_wait_for_cmd(card->host, &cmd, 5);
 	if (err == 0)
 		*status = cmd.resp[0];
@@ -542,7 +560,8 @@ static int get_card_status(struct mmc_card *card, u32 *status, int retries)
 	cmd.opcode = MMC_SEND_STATUS;
 	if (!mmc_host_is_spi(card->host))
 		cmd.arg = card->rca << 16;
-	cmd.flags = MMC_RSP_SPI_R2 | MMC_RSP_R1 | MMC_CMD_AC;
+	//cmd.flags = MMC_RSP_SPI_R2 | MMC_RSP_R1 | MMC_CMD_AC;
+	cmd.flags = MMC_RSP_R1 | MMC_CMD_AC;
 	err = mmc_wait_for_cmd(card->host, &cmd, retries);
 	if (err == 0)
 		*status = cmd.resp[0];
@@ -826,7 +845,7 @@ static int mmc_blk_issue_rw_rq(struct mmc_queue *mq, struct request *req)
 	struct mmc_card *card = md->queue.card;
 	struct mmc_blk_request brq;
 	int ret = 1, disable_multi = 0, retry = 0;
-
+	
 	/*
 	 * Reliable writes are used to implement Forced Unit Access and
 	 * REQ_META accesses, and are supported only on MMCs.
@@ -846,11 +865,13 @@ static int mmc_blk_issue_rw_rq(struct mmc_queue *mq, struct request *req)
 		brq.cmd.arg = blk_rq_pos(req);
 		if (!mmc_card_blockaddr(card))
 			brq.cmd.arg <<= 9;
-		brq.cmd.flags = MMC_RSP_SPI_R1 | MMC_RSP_R1 | MMC_CMD_ADTC;
+		//brq.cmd.flags = MMC_RSP_SPI_R1 | MMC_RSP_R1 | MMC_CMD_ADTC;
+		brq.cmd.flags = MMC_RSP_R1 | MMC_CMD_ADTC;
 		brq.data.blksz = 512;
 		brq.stop.opcode = MMC_STOP_TRANSMISSION;
 		brq.stop.arg = 0;
-		brq.stop.flags = MMC_RSP_SPI_R1B | MMC_RSP_R1B | MMC_CMD_AC;
+		//brq.stop.flags = MMC_RSP_SPI_R1B | MMC_RSP_R1B | MMC_CMD_AC;
+		brq.stop.flags = MMC_RSP_R1B | MMC_CMD_AC;
 		brq.data.blocks = blk_rq_sectors(req);
 
 		/*
@@ -1099,6 +1120,15 @@ static int mmc_blk_issue_rq(struct mmc_queue *mq, struct request *req)
 #endif
 
 	mmc_claim_host(card->host);
+
+#ifdef CONFIG_MMC_UNSAFE_RESUME
+/*
+		if(card->host->card_attath_status == card_attach_status_change) {
+			goto cmd_err;
+		}
+*/
+#endif
+
 	ret = mmc_blk_part_switch(card, md);
 	if (ret) {
 		ret = 0;
@@ -1205,8 +1235,11 @@ static struct mmc_blk_data *mmc_blk_alloc_req(struct mmc_card *card,
 	 * messages to tell when the card is present.
 	 */
 
+	/*snprintf(md->disk->disk_name, sizeof(md->disk->disk_name),
+		 "mmcblk%d%s", md->name_idx, subname ? subname : "");*/
+	
 	snprintf(md->disk->disk_name, sizeof(md->disk->disk_name),
-		 "mmcblk%d%s", md->name_idx, subname ? subname : "");
+		 "mmcblk%d%s", card->host->wmt_host_index, subname ? subname : "");
 
 	blk_queue_logical_block_size(md->queue.queue, 512);
 	set_capacity(md->disk, size);
@@ -1441,6 +1474,39 @@ static int mmc_blk_probe(struct mmc_card *card)
 		if (mmc_add_disk(part_md))
 			goto out;
 	}
+
+	
+	/*add by jay*/
+	// BassHuang modify
+	if(root_from_sd0 && !strncmp(md->disk->disk_name,"mmcblk0",7)) {
+		if(!root_scan_done) {
+			printk("root sd scan0 done, wake kernel_init to mount rootfs\n");
+			root_scan_done = 1;
+			wake_up(&root_wait_queue);
+		}
+	}	
+	else if(root_from_sd1 && !strncmp(md->disk->disk_name,"mmcblk1",7)) {
+		if(!root_scan_done) {
+			printk("root sd scan1 done, wake kernel_init to mount rootfs\n");
+			root_scan_done = 1;
+			wake_up(&root_wait_queue);
+		}
+	}
+	else if(root_from_sd2 && !strncmp(md->disk->disk_name,"mmcblk2",7)) {
+		if(!root_scan_done) {
+			printk("root sd scan2 done, wake kernel_init to mount rootfs\n");
+			root_scan_done = 1;
+			wake_up(&root_wait_queue);
+		}
+	}
+	else if(root_from_sd3 && !strncmp(md->disk->disk_name,"mmcblk3",7)) {
+		if(!root_scan_done) {
+			printk("root sd scan3 done, wake kernel_init to mount rootfs\n");
+			root_scan_done = 1;
+			wake_up(&root_wait_queue);
+		}
+	}
+
 	return 0;
 
  out:

@@ -461,7 +461,7 @@ static int tt_no_collision (
 static int enable_periodic (struct ehci_hcd *ehci)
 {
 	u32	cmd;
-	int	status;
+	//int	status;
 
 	if (ehci->periodic_sched++)
 		return 0;
@@ -469,13 +469,18 @@ static int enable_periodic (struct ehci_hcd *ehci)
 	/* did clearing PSE did take effect yet?
 	 * takes effect only at frame boundaries...
 	 */
+	/* CharlesTu,2009.10.06,patch Ralink RT73 usb wifi driver with usb HS hub plug out issue.
+	*  Root cause: plug out and plug in usb hub , cause get hub port status fail in hub event .
+	*  Solution : Don't handshake. Due to STS_PSS always 1.
+	*/ 
+	/*
 	status = handshake_on_error_set_halt(ehci, &ehci->regs->status,
 					     STS_PSS, 0, 9 * 125);
 	if (status) {
 		usb_hc_died(ehci_to_hcd(ehci));
 		return status;
 	}
-
+      */
 	cmd = ehci_readl(ehci, &ehci->regs->command) | CMD_PSE;
 	ehci_writel(ehci, cmd, &ehci->regs->command);
 	/* posted write ... PSS happens later */
@@ -517,8 +522,12 @@ static int disable_periodic (struct ehci_hcd *ehci)
 		return status;
 	}
 
+	
+	
 	cmd = ehci_readl(ehci, &ehci->regs->command) & ~CMD_PSE;
 	ehci_writel(ehci, cmd, &ehci->regs->command);
+	
+	
 	/* posted write ... */
 
 	free_cached_lists(ehci);
@@ -635,7 +644,8 @@ static int qh_unlink_periodic(struct ehci_hcd *ehci, struct ehci_qh *qh)
 	qh_put (qh);
 
 	/* maybe turn off periodic schedule */
-	return disable_periodic(ehci);
+	//return disable_periodic(ehci);
+	return 0;
 }
 
 static void intr_deschedule (struct ehci_hcd *ehci, struct ehci_qh *qh)
@@ -1744,7 +1754,7 @@ itd_complete (
 	ehci_urb_done(ehci, urb, 0);
 	retval = true;
 	urb = NULL;
-	(void) disable_periodic(ehci);
+	//(void) disable_periodic(ehci); gri
 	ehci_to_hcd(ehci)->self.bandwidth_isoc_reqs--;
 
 	if (ehci_to_hcd(ehci)->self.bandwidth_isoc_reqs == 0) {
@@ -2140,7 +2150,7 @@ sitd_complete (
 	ehci_urb_done(ehci, urb, 0);
 	retval = true;
 	urb = NULL;
-	(void) disable_periodic(ehci);
+	//(void) disable_periodic(ehci);//gri
 	ehci_to_hcd(ehci)->self.bandwidth_isoc_reqs--;
 
 	if (ehci_to_hcd(ehci)->self.bandwidth_isoc_reqs == 0) {

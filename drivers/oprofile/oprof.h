@@ -30,11 +30,18 @@ extern struct oprofile_operations oprofile_ops;
 extern unsigned long oprofile_started;
 extern unsigned long oprofile_backtrace_depth;
 
+/* 2012-03-08 YJChen: Add Begin */
+extern unsigned int TIMER2_LATCH;
+/* 2012-03-08 YJChen: Add End */
+
 struct super_block;
 struct dentry;
 
 void oprofile_create_files(struct super_block *sb, struct dentry *root);
 int oprofile_timer_init(struct oprofile_operations *ops);
+/* 2012-03-08 YJChen: Add Begin */
+int oprofile_timer2_init(struct oprofile_operations *ops);
+/* 2012-03-08 YJChen: Add End */
 void oprofile_timer_exit(void);
 
 int oprofile_set_ulong(unsigned long *addr, unsigned long val);

@@ -259,7 +259,8 @@ static int mmc_read_ext_csd(struct mmc_card *card, u8 *ext_csd)
 	}
 
 	card->ext_csd.rev = ext_csd[EXT_CSD_REV];
-	if (card->ext_csd.rev > 5) {
+	if (card->ext_csd.rev > 6) {
+//	if (card->ext_csd.rev > 5) {
 		printk(KERN_ERR "%s: unrecognised EXT_CSD revision %d\n",
 			mmc_hostname(card->host), card->ext_csd.rev);
 		err = -EINVAL;
@@ -885,7 +886,16 @@ static void mmc_detect(struct mmc_host *host)
 	err = mmc_send_status(host->card, NULL);
 
 	mmc_release_host(host);
-
+#ifdef CONFIG_MMC_UNSAFE_RESUME
+		if (err || (host->card_attath_status == card_attach_status_change)) {
+			host->card_attath_status = card_attach_status_unchange;
+			mmc_remove(host);
+	
+			mmc_claim_host(host);
+			mmc_detach_bus(host);
+			mmc_release_host(host);
+		}
+#else
 	if (err) {
 		mmc_remove(host);
 
@@ -893,6 +903,7 @@ static void mmc_detect(struct mmc_host *host)
 		mmc_detach_bus(host);
 		mmc_release_host(host);
 	}
+#endif	
 }
 
 /*
@@ -928,6 +939,11 @@ static int mmc_resume(struct mmc_host *host)
 	mmc_claim_host(host);
 	err = mmc_init_card(host, host->ocr, host->card);
 	mmc_release_host(host);
+
+#ifdef CONFIG_MMC_UNSAFE_RESUME
+	if (err)
+		host->card_attath_status = card_attach_status_change;
+#endif	
 
 	return err;
 }

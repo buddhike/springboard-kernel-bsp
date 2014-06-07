@@ -151,7 +151,7 @@ EXPORT_SYMBOL_GPL(ehci_cf_port_reset_rwsem);
 #define HUB_DEBOUNCE_TIMEOUT	1500
 #define HUB_DEBOUNCE_STEP	  25
 #define HUB_DEBOUNCE_STABLE	 100
-
+unsigned int usb_storage_id = 0;
 
 static int usb_reset_and_verify_device(struct usb_device *udev);
 
@@ -567,6 +567,8 @@ EXPORT_SYMBOL_GPL(usb_hub_clear_tt_buffer);
 /* If do_delay is false, return the number of milliseconds the caller
  * needs to delay.
  */
+/*CharlesTu,2012.09.14,improve resume time*/ 
+unsigned char usb_resume_flag=0;  
 static unsigned hub_power_on(struct usb_hub *hub, bool do_delay)
 {
 	int port1;
@@ -592,7 +594,9 @@ static unsigned hub_power_on(struct usb_hub *hub, bool do_delay)
 	/* Wait at least 100 msec for power to become stable */
 	delay = max(pgood_delay, (unsigned) 100);
 	if (do_delay)
-		msleep(delay);
+		if (!usb_resume_flag) {
+			 msleep(delay);
+		}
 	return delay;
 }
 
@@ -798,12 +802,17 @@ static void hub_activate(struct usb_hub *hub, enum hub_activation_type type)
 
 		/* Clear status-change flags; we'll debounce later */
 		if (portchange & USB_PORT_STAT_C_CONNECTION) {
+			if (!usb_resume_flag) {
 			need_debounce_delay = true;
+			}
 			clear_port_feature(hub->hdev, port1,
 					USB_PORT_FEAT_C_CONNECTION);
 		}
 		if (portchange & USB_PORT_STAT_C_ENABLE) {
-			need_debounce_delay = true;
+			
+				if (!usb_resume_flag) {
+					need_debounce_delay = true;
+				}
 			clear_port_feature(hub->hdev, port1,
 					USB_PORT_FEAT_C_ENABLE);
 		}
@@ -1531,8 +1540,10 @@ void usb_set_device_state(struct usb_device *udev,
 	} else
 		recursively_mark_NOTATTACHED(udev);
 	spin_unlock_irqrestore(&device_state_lock, flags);
-	if (wakeup >= 0)
+	if (wakeup >= 0) {
 		device_set_wakeup_capable(&udev->dev, wakeup);
+		device_wakeup_enable(&udev->dev);//gri
+	}
 }
 EXPORT_SYMBOL_GPL(usb_set_device_state);
 
@@ -2119,7 +2130,7 @@ static int hub_port_reset(struct usb_hub *hub, int port1,
 		switch (status) {
 		case 0:
 			/* TRSTRCY = 10 ms; plus some extra */
-			msleep(10 + 40);
+			  msleep(10);  /*CharlesTu,2012.09.14,improve resume time*/
 			update_devnum(udev, 0);
 			if (hcd->driver->reset_device) {
 				status = hcd->driver->reset_device(hcd, udev);
@@ -2649,9 +2660,10 @@ static int hub_resume(struct usb_interface *intf)
 static int hub_reset_resume(struct usb_interface *intf)
 {
 	struct usb_hub *hub = usb_get_intfdata(intf);
-
+	usb_resume_flag = 1;
 	dev_dbg(&intf->dev, "%s\n", __func__);
 	hub_activate(hub, HUB_RESET_RESUME);
+	usb_resume_flag = 0;
 	return 0;
 }
 
@@ -3373,7 +3385,7 @@ static void hub_events(void)
 	u16 hubchange;
 	u16 portstatus;
 	u16 portchange;
-	int i, ret;
+	int i, ret,j = 0;
 	int connect_change;
 
 	/*
@@ -3448,8 +3460,18 @@ static void hub_events(void)
 			hub->error = 0;
 		}
 
-		/* deal with port status changes */
-		for (i = 1; i <= hub->descriptor->bNbrPorts; i++) {
+		/* deal with other port status changes */
+                
+		//for (i = 1; i <= hub->descriptor->bNbrPorts; i++) {
+		for (j = 1; j <= hub->descriptor->bNbrPorts; j++) {
+					i = j;
+			if (hub->descriptor->bNbrPorts > 2 )  {
+				if (usb_storage_id)
+					i = (j + usb_storage_id -2 ) % hub->descriptor->bNbrPorts + 1 ;
+			
+			};
+				
+
 			if (test_bit(i, hub->busy_bits))
 				continue;
 			connect_change = test_bit(i, hub->change_bits);
