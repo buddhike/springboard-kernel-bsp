@@ -897,7 +897,7 @@ EXTERN void vpp_calculate_clock(vpp_base_clock_t *clk,unsigned int div_max,unsig
 EXTERN void vpp_govw_dynamic_tg_set_rcyc(int rcyc);
 EXTERN void vpp_govw_dynamic_tg(int err);
 EXTERN void vpp_set_vppm_int_enable(vpp_int_t int_bit,int enable);
-EXTERN __inline__ void vpp_cache_sync(void);
+EXTERN void vpp_cache_sync(void);
 EXTERN int vpp_calc_align(int value,int align);
 EXTERN int vpp_calc_fb_width(vdo_color_fmt colfmt,int width);
 EXTERN void vpp_get_colfmt_bpp(vdo_color_fmt colfmt,int *y_bpp,int *c_bpp);
